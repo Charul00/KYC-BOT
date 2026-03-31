@@ -1,6 +1,10 @@
-# Constraints file to use pre-built wheels on Render
-# Prevents Rust compilation errors with maturin packages
+# Constraints file for Render deployment
+# Force pre-built wheels to avoid Rust compilation errors
+# Render environment has read-only filesystem restrictions
 
-# Force pre-built wheels for packages with Rust extensions
-tokenizers==0.19.1          # Has wheels for Python 3.11
-cryptography>=41.0.0        # Pre-built available
+# Maturin-based packages (must use wheels)
+tokenizers==0.15.1
+cryptography>=41.0.0
+
+# Python 3.12 compatibility required
+# Pins versions that have wheels for Python 3.12+

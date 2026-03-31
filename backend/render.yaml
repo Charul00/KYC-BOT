@@ -27,10 +27,8 @@ services:
       - key: MAX_MEMORY_MESSAGES
         value: "5"
       - key: PYTHON_VERSION
-        value: "3.11.0"
+        value: "3.12.0"
       - key: PIP_NO_BUILD_ISOLATION
-        value: "false"
-      - key: CARGO_NET_OFFLINE
-        value: "false"
+        value: "1"
       - key: CRYPTOGRAPHY_DONT_BUILD_RUST
         value: "1"

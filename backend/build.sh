@@ -5,14 +5,13 @@ set -o errexit
 echo "=== Installing Python dependencies ==="
 pip install --upgrade pip
 
-# Disable Cargo telemetry to avoid read-only filesystem errors
-export CARGO_NET_OFFLINE=false
-export RUST_LOG=info
+# Force pre-built wheels to avoid Rust compilation on Render
+# Render has read-only filesystem restrictions that break maturin builds
+export PIP_NO_BUILD_ISOLATION=1
+export CRYPTOGRAPHY_DONT_BUILD_RUST=1
 
-# Install with pre-built wheels only to avoid Rust compilation issues
-pip install --only-binary :all: tokenizers==0.19.1 || pip install tokenizers==0.19.1
-
-# Install all requirements
+# Install with --no-build-isolation to use only pre-built wheels
+pip install --no-build-isolation --only-binary :all: -r requirements.txt || \
 pip install -r requirements.txt
 
 echo "=== Creating required directories ==="
