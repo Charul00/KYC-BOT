@@ -28,3 +28,7 @@ services:
         value: "5"
       - key: PYTHON_VERSION
         value: "3.14.3"
+      - key: CARGO_HOME
+        value: /tmp/.cargo
+      - key: RUSTUP_HOME
+        value: /tmp/.rustup

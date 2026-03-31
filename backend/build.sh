@@ -4,11 +4,15 @@ set -o errexit
 
 echo "=== Installing Python dependencies ==="
 
-# Create pip config to force binary-only installs
+# Use writable Rust/Cargo locations (Render system paths are read-only)
+export CARGO_HOME=/tmp/.cargo
+export RUSTUP_HOME=/tmp/.rustup
+mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
+
+# Create pip config to prefer wheels but allow source fallback when needed
 mkdir -p ~/.pip
 cat > ~/.pip/pip.conf << 'EOF'
 [global]
-only-binary = :all:
 prefer-binary = True
 timeout = 180
 
@@ -18,8 +22,8 @@ EOF
 
 pip install --upgrade pip
 
-# Install strictly from wheels so Render never attempts Rust/maturin source builds.
-pip install --only-binary :all: --prefer-binary --no-cache-dir -r requirements.txt
+# Install dependencies (source build allowed for packages lacking cp314 wheels)
+pip install --prefer-binary --no-cache-dir -r requirements.txt
 
 echo "=== Creating required directories ==="
 mkdir -p /tmp/kyc_chroma_db
