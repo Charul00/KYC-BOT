@@ -45,9 +45,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list = [
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://*.vercel.app",
     ]
     # Set this env var on Render after you deploy frontend to Vercel
+    # Example: https://kyc-chatbot-eclerx.vercel.app
     FRONTEND_URL: str = ""
 
     class Config:

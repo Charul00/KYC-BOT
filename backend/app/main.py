@@ -69,13 +69,22 @@ app = FastAPI(
 
 # CORS middleware — dynamically include FRONTEND_URL if set
 cors_origins = list(settings.CORS_ORIGINS)
-if settings.FRONTEND_URL and settings.FRONTEND_URL not in cors_origins:
-    cors_origins.append(settings.FRONTEND_URL)
+if settings.FRONTEND_URL:
+    # Add the exact Vercel URL for production
+    if settings.FRONTEND_URL not in cors_origins:
+        cors_origins.append(settings.FRONTEND_URL)
+    # Also allow the URL without trailing slash and vice versa
+    alt = settings.FRONTEND_URL.rstrip("/")
+    if alt not in cors_origins:
+        cors_origins.append(alt)
+
+# For demo/dev: if no FRONTEND_URL is configured, allow all origins
+use_allow_all = not settings.FRONTEND_URL
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"] if use_allow_all else cors_origins,
+    allow_credentials=not use_allow_all,  # credentials can't be used with wildcard
     allow_methods=["*"],
     allow_headers=["*"],
 )
