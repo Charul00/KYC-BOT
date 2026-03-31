@@ -8,6 +8,8 @@ echo "=== Installing Python dependencies ==="
 export CARGO_HOME=/tmp/.cargo
 export RUSTUP_HOME=/tmp/.rustup
 export PATH="$CARGO_HOME/bin:$PATH"
+# Required for Rust extensions (PyO3) that haven't formally added Python 3.14 yet.
+export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
 
 # Ensure a usable Rust toolchain is available for packages that compile native extensions.
