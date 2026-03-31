@@ -34,3 +34,5 @@ services:
         value: /tmp/.rustup
       - key: PYO3_USE_ABI3_FORWARD_COMPATIBILITY
         value: "1"
+      - key: FRONTEND_URL
+        value: "https://kyc-bot.vercel.app"

@@ -44,6 +44,8 @@ async def chat(request: ChatRequest):
 
         answer = result["answer"]
         source_docs = result.get("source_documents", [])
+        query_type = result.get("query_type", "SIMPLE")
+        logger.info(f"Query type: {query_type} | Sources: {len(source_docs)} | Answer length: {len(answer)}")
 
         memory_service.add_exchange(
             session_id=request.session_id,

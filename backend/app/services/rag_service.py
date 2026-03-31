@@ -1,6 +1,6 @@
 """
-RAG Service - Production-level RAG pipeline.
-Architecture: ChromaDB (dense) + BM25 (sparse) + FlashRank Re-Ranker.
+RAG Service — Production-level hybrid retrieval pipeline.
+Architecture: Query Classification → Query Rewriting → ChromaDB (dense) + BM25 (sparse) → RRF → Re-Rank → LLM.
 """
 
 import os
@@ -19,7 +19,11 @@ from langchain.prompts import PromptTemplate
 from rank_bm25 import BM25Okapi
 
 from app.config import settings
-from app.prompts.templates import QA_PROMPT, CONDENSE_QUESTION_PROMPT
+from app.prompts.templates import (
+    QA_PROMPT,
+    CONDENSE_QUESTION_PROMPT,
+    QUERY_CLASSIFIER_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,18 +33,39 @@ def _tokenize(text: str) -> List[str]:
     return re.findall(r"\w+", text.lower())
 
 
+# ── Retrieval config per query type
+RETRIEVAL_CONFIG = {
+    "GREETING":      {"top_k": 0,  "skip_retrieval": True},
+    "OUT_OF_SCOPE":  {"top_k": 0,  "skip_retrieval": True},
+    "SIMPLE":        {"top_k": 4,  "skip_retrieval": False},
+    "COMPLEX":       {"top_k": 8,  "skip_retrieval": False},
+    "TRICKY":        {"top_k": 8,  "skip_retrieval": False},
+    "ADVERSARIAL":   {"top_k": 6,  "skip_retrieval": False},
+}
+
+# ── Greeting patterns (fast path — no LLM call needed)
+GREETING_PATTERNS = re.compile(
+    r"^(hi|hello|hey|hii+|good\s*(morning|evening|afternoon)|thanks|thank\s*you|bye|ok|okay|sure|hmm|yo|sup)\s*[!?.]*$",
+    re.IGNORECASE,
+)
+
+
 class RAGService:
     """
-    Production RAG service with hybrid retrieval:
-    1. ChromaDB dense vector search (semantic similarity)
-    2. BM25 sparse keyword search (lexical matching)
-    3. FlashRank re-ranking (precision boost, lightweight)
+    Production RAG service with:
+    1. Query classification (greeting / simple / complex / tricky / adversarial / out-of-scope)
+    2. Query rewriting (follow-up → standalone question)
+    3. Hybrid retrieval: ChromaDB (dense) + BM25 (sparse)
+    4. Reciprocal Rank Fusion
+    5. FlashRank re-ranking
+    6. Adaptive context window per query type
     """
 
     def __init__(self):
         self._embeddings: Optional[OpenAIEmbeddings] = None
         self._vector_store: Optional[Chroma] = None
         self._llm: Optional[ChatOpenAI] = None
+        self._llm_fast: Optional[ChatOpenAI] = None  # lightweight model for classification
         self._text_splitter: Optional[RecursiveCharacterTextSplitter] = None
         self._qa_chain: Optional[ConversationalRetrievalChain] = None
         self._reranker = None
@@ -83,7 +108,7 @@ class RAGService:
         # 5. BM25 index
         self._rebuild_bm25_index()
 
-        # 6. LLM
+        # 6. Main LLM (for answering)
         self._llm = ChatOpenAI(
             model_name=settings.MODEL_NAME,
             temperature=settings.TEMPERATURE,
@@ -91,11 +116,19 @@ class RAGService:
             openai_api_key=settings.OPENAI_API_KEY,
         )
 
-        # 7. QA chain (fallback)
+        # 7. Fast LLM (for classification + query rewriting — cheaper calls)
+        self._llm_fast = ChatOpenAI(
+            model_name="gpt-4o-mini",
+            temperature=0.0,
+            max_tokens=100,
+            openai_api_key=settings.OPENAI_API_KEY,
+        )
+
+        # 8. QA chain (fallback)
         self._build_qa_chain()
 
         self._initialized = True
-        logger.info("RAG Service initialized (ChromaDB + BM25 + FlashRank).")
+        logger.info("RAG Service initialized (ChromaDB + BM25 + FlashRank + Query Classifier).")
 
     def _init_vector_store(self):
         """Initialize ChromaDB."""
@@ -124,7 +157,7 @@ class RAGService:
     def _init_reranker(self):
         """Initialize FlashRank re-ranker (lightweight, CPU-only)."""
         try:
-            from flashrank import Ranker, RerankRequest
+            from flashrank import Ranker
             self._reranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2", cache_dir="/tmp/flashrank")
             logger.info("FlashRank re-ranker loaded: ms-marco-MiniLM-L-12-v2")
         except Exception as e:
@@ -209,6 +242,64 @@ class RAGService:
         return len(chunks)
 
     # ==========================================
+    # Query Classification & Rewriting
+    # ==========================================
+
+    def _classify_query(self, query: str) -> str:
+        """Classify the query type using fast LLM or regex."""
+        # Fast path — check greeting regex
+        if GREETING_PATTERNS.match(query.strip()):
+            return "GREETING"
+
+        try:
+            prompt = QUERY_CLASSIFIER_PROMPT.format(question=query)
+            response = self._llm_fast.invoke(prompt)
+            category = response.content.strip().upper().replace(" ", "_")
+            if category in RETRIEVAL_CONFIG:
+                logger.info(f"Query classified as: {category}")
+                return category
+            logger.warning(f"Unknown category '{category}', defaulting to SIMPLE")
+            return "SIMPLE"
+        except Exception as e:
+            logger.warning(f"Classification failed, defaulting to SIMPLE: {e}")
+            return "SIMPLE"
+
+    def _rewrite_query(self, query: str, chat_history: List[Tuple[str, str]]) -> str:
+        """Rewrite follow-up questions into standalone queries using chat history."""
+        if not chat_history:
+            return query
+
+        # If the query is already self-contained (no pronouns/references), skip rewriting
+        follow_up_markers = ["it", "that", "this", "those", "these", "they", "them",
+                             "same", "above", "previous", "also", "what about", "and the",
+                             "how about", "is there", "what's"]
+        query_lower = query.lower()
+        needs_rewrite = any(marker in query_lower for marker in follow_up_markers)
+
+        if not needs_rewrite and len(query.split()) > 5:
+            return query
+
+        try:
+            history_str = ""
+            for human, ai in chat_history[-3:]:  # Last 3 exchanges for context
+                history_str += f"Human: {human}\nAI: {ai[:200]}\n\n"
+
+            prompt = CONDENSE_QUESTION_PROMPT.format(
+                chat_history=history_str,
+                question=query,
+            )
+            response = self._llm_fast.invoke(prompt)
+            rewritten = response.content.strip()
+
+            if rewritten and len(rewritten) > 3:
+                logger.info(f"Query rewritten: '{query}' → '{rewritten}'")
+                return rewritten
+            return query
+        except Exception as e:
+            logger.warning(f"Query rewriting failed: {e}")
+            return query
+
+    # ==========================================
     # Hybrid Retrieval: Dense + BM25 + Re-Rank
     # ==========================================
 
@@ -257,7 +348,7 @@ class RAGService:
         4. FlashRank re-rank for final precision
         """
         k = k or settings.TOP_K_RESULTS
-        fetch_k = k * 3
+        fetch_k = k * 3  # Over-fetch then re-rank
 
         # Dense search
         dense_results = self._vector_store.similarity_search(query, k=fetch_k)
@@ -284,7 +375,7 @@ class RAGService:
 
         # Sort by RRF score
         sorted_keys = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
-        merged = [doc_map[key] for key in sorted_keys if key in doc_map][: fetch_k]
+        merged = [doc_map[key] for key in sorted_keys if key in doc_map][:fetch_k]
 
         # Re-rank with FlashRank
         final = self._rerank(query, merged, top_k=k)
@@ -323,24 +414,70 @@ class RAGService:
         )
         logger.info("QA Chain built.")
 
+    # ==========================================
+    # Main Answer Pipeline
+    # ==========================================
+
     async def get_answer(self, query: str, chat_history: List[Tuple[str, str]]) -> dict:
-        """Get answer using hybrid retrieval + re-ranking."""
+        """
+        Full pipeline:
+        1. Classify query type
+        2. Rewrite follow-ups
+        3. Adaptive hybrid retrieval
+        4. Build context + prompt
+        5. Generate answer
+        """
         if not self._initialized:
             self.initialize()
 
         try:
-            # Hybrid search for context
-            relevant_docs = self.hybrid_search(query)
+            # ── Step 1: Classify query
+            query_type = self._classify_query(query)
+            config = RETRIEVAL_CONFIG.get(query_type, RETRIEVAL_CONFIG["SIMPLE"])
 
-            # Build context from hybrid results
+            logger.info(f"Pipeline: type={query_type}, top_k={config['top_k']}, skip={config['skip_retrieval']}")
+
+            # ── Step 2: Handle greetings and out-of-scope (no retrieval needed)
+            if config["skip_retrieval"]:
+                context = "No document context needed for this response."
+                # For greetings, use a minimal prompt
+                if query_type == "GREETING":
+                    response = self._llm.invoke(
+                        f"You are the eClerx KYC Assistant. The user said: \"{query}\". "
+                        f"Respond warmly and naturally, then offer to help with KYC documents. "
+                        f"Keep it to 1–2 sentences."
+                    )
+                else:
+                    response = self._llm.invoke(
+                        f"You are the eClerx KYC Assistant. The user asked: \"{query}\". "
+                        f"This is outside your scope. Politely say you're designed for KYC document queries only "
+                        f"and offer to help with document questions. Keep it friendly and brief."
+                    )
+                return {
+                    "answer": response.content,
+                    "source_documents": [],
+                    "query_type": query_type,
+                }
+
+            # ── Step 3: Rewrite follow-up questions
+            search_query = self._rewrite_query(query, chat_history)
+
+            # ── Step 4: Hybrid retrieval with adaptive top_k
+            relevant_docs = self.hybrid_search(search_query, k=config["top_k"])
+
+            # ── Step 5: Build context
             context = "\n\n---\n\n".join(doc.page_content for doc in relevant_docs)
 
-            # Format chat history
+            # If no context found, provide a hint
+            if not context.strip():
+                context = "[No relevant document sections were found for this query.]"
+
+            # ── Step 6: Format chat history
             history_str = ""
-            for human, ai in chat_history[-settings.MAX_MEMORY_MESSAGES :]:
+            for human, ai in chat_history[-settings.MAX_MEMORY_MESSAGES:]:
                 history_str += f"Human: {human}\nAssistant: {ai}\n\n"
 
-            # Direct LLM call with hybrid context
+            # ── Step 7: Generate answer
             prompt = PromptTemplate(
                 template=QA_PROMPT,
                 input_variables=["context", "chat_history", "question"],
@@ -348,13 +485,16 @@ class RAGService:
             formatted = prompt.format(
                 context=context,
                 chat_history=history_str,
-                question=query,
+                question=query,  # Use original query (not rewritten) so the answer addresses the user's words
             )
             response = self._llm.invoke(formatted)
+
+            logger.info(f"Answer generated: {len(response.content)} chars, {len(relevant_docs)} sources")
 
             return {
                 "answer": response.content,
                 "source_documents": relevant_docs,
+                "query_type": query_type,
             }
 
         except Exception as e:

@@ -27,12 +27,12 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 50
 
     # Retrieval Configuration
-    TOP_K_RESULTS: int = 4
+    TOP_K_RESULTS: int = 6
     SIMILARITY_THRESHOLD: float = 0.7
 
     # LLM Configuration
     TEMPERATURE: float = 0.0
-    MAX_TOKENS: int = 1024
+    MAX_TOKENS: int = 2048
 
     # Memory Configuration
     MAX_MEMORY_MESSAGES: int = 5
