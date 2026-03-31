@@ -96,8 +96,7 @@ class RAGService:
         # 7. QA chain (fallback)
         self._build_qa_chain()
 
-        self._initialized = TrueRRF). FlashRank: %s", 
-                   "enabled" if self._reranker else "disabled
+        self._initialized = True
         logger.info("RAG Service initialized (ChromaDB + BM25 + FlashRank).")
 
     def _init_vector_store(self):
