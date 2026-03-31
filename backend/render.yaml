@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: kyc-chatbot-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CHROMA_PERSIST_DIR
+        value: /tmp/kyc_chroma_db
+      - key: DOCUMENTS_DIR
+        value: ./data/documents
+      - key: MODEL_NAME
+        value: gpt-4o
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: CHUNK_SIZE
+        value: "500"
+      - key: CHUNK_OVERLAP
+        value: "50"
+      - key: TOP_K_RESULTS
+        value: "4"
+      - key: TEMPERATURE
+        value: "0"
+      - key: MAX_MEMORY_MESSAGES
+        value: "5"
+      - key: PYTHON_VERSION
+        value: "3.11.0"
