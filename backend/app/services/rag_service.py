@@ -1,7 +1,6 @@
 """
 RAG Service - Production-level RAG pipeline.
-Architecture: ChromaDB (dense) + BM25 (sparse) + RRF (Reciprocal Rank Fusion).
-Note: FlashRank optional (graceful fallback to RRF if unavailable).
+Architecture: ChromaDB (dense) + BM25 (sparse) + FlashRank Re-Ranker.
 """
 
 import os
@@ -35,8 +34,7 @@ class RAGService:
     Production RAG service with hybrid retrieval:
     1. ChromaDB dense vector search (semantic similarity)
     2. BM25 sparse keyword search (lexical matching)
-    3. Reciprocal Rank Fusion (RRF) to merge results
-    4. Optional: FlashRank re-ranking (graceful fallback if unavailable)
+    3. FlashRank re-ranking (precision boost, lightweight)
     """
 
     def __init__(self):
@@ -240,11 +238,8 @@ class RAGService:
 
             reranked = []
             for r in results[:top_k]:
-                # FlashRank returns objects — try both attribute and dict access
-                idx = getattr(r, "id", None)
-                if idx is None:
-                    idx = r.get("id") if isinstance(r, dict) else None
-                if idx is not None and idx < len(docs):
+                idx = r["id"]
+                if idx < len(docs):
                     reranked.append(docs[idx])
 
             logger.info(f"Re-ranked {len(docs)} -> top {len(reranked)}")
