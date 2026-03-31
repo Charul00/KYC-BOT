@@ -1,6 +1,7 @@
 """
 RAG Service - Production-level RAG pipeline.
-Architecture: ChromaDB (dense) + BM25 (sparse) + FlashRank Re-Ranker.
+Architecture: ChromaDB (dense) + BM25 (sparse) + RRF (Reciprocal Rank Fusion).
+Note: FlashRank optional (graceful fallback to RRF if unavailable).
 """
 
 import os
@@ -34,7 +35,8 @@ class RAGService:
     Production RAG service with hybrid retrieval:
     1. ChromaDB dense vector search (semantic similarity)
     2. BM25 sparse keyword search (lexical matching)
-    3. FlashRank re-ranking (precision boost, lightweight)
+    3. Reciprocal Rank Fusion (RRF) to merge results
+    4. Optional: FlashRank re-ranking (graceful fallback if unavailable)
     """
 
     def __init__(self):
@@ -94,7 +96,8 @@ class RAGService:
         # 7. QA chain (fallback)
         self._build_qa_chain()
 
-        self._initialized = True
+        self._initialized = TrueRRF). FlashRank: %s", 
+                   "enabled" if self._reranker else "disabled
         logger.info("RAG Service initialized (ChromaDB + BM25 + FlashRank).")
 
     def _init_vector_store(self):
