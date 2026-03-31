@@ -91,6 +91,8 @@ app.add_middleware(
 
 # Include routers
 app.include_router(chat_router, prefix="/api/v1", tags=["Chat"])
+# Backward-compatible aliases for deployments/frontends still calling unprefixed routes.
+app.include_router(chat_router, tags=["Chat Compatibility"])
 
 
 # ========================
