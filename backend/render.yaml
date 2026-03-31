@@ -27,7 +27,7 @@ services:
       - key: MAX_MEMORY_MESSAGES
         value: "5"
       - key: PYTHON_VERSION
-        value: "3.14.3"
+        value: "3.13.2"
       - key: CARGO_HOME
         value: /tmp/.cargo
       - key: RUSTUP_HOME
