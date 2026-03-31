@@ -9,7 +9,6 @@ mkdir -p ~/.pip
 cat > ~/.pip/pip.conf << 'EOF'
 [global]
 only-binary = :all:
-no-build-isolation = True
 prefer-binary = True
 timeout = 180
 
@@ -19,11 +18,8 @@ EOF
 
 pip install --upgrade pip
 
-# Use aggressive binary-only installation
-pip install --only-binary :all: --no-cache-dir -r requirements.txt 2>&1 || {
-  echo "Binary-only install encountered issues, trying with fallback..."
-  pip install --prefer-binary --no-cache-dir -r requirements.txt
-}
+# Install strictly from wheels so Render never attempts Rust/maturin source builds.
+pip install --only-binary :all: --prefer-binary --no-cache-dir -r requirements.txt
 
 echo "=== Creating required directories ==="
 mkdir -p /tmp/kyc_chroma_db
