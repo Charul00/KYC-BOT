@@ -27,8 +27,4 @@ services:
       - key: MAX_MEMORY_MESSAGES
         value: "5"
       - key: PYTHON_VERSION
-        value: "3.12.0"
-      - key: PIP_NO_BUILD_ISOLATION
-        value: "1"
-      - key: CRYPTOGRAPHY_DONT_BUILD_RUST
-        value: "1"
+        value: "3.11.5"

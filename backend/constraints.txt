@@ -1,10 +1,16 @@
-# Constraints file for Render deployment
-# Force pre-built wheels to avoid Rust compilation errors
-# Render environment has read-only filesystem restrictions
+# Constraints file for Render deployment - Python 3.11.5
+# Simplified dependencies to avoid Rust compilation errors
+# Using only pure-Python packages where possible
 
-# Maturin-based packages (must use wheels)
-tokenizers==0.15.1
-cryptography>=41.0.0
+# Core dependencies (wheel-only, no Rust needed)
+langchain==0.1.14
+langchain-openai==0.0.6
+langchain-community==0.0.12
+chromadb==0.3.21
+pypdf>=4.0.0,<5.0.0
+rank-bm25>=0.2.0
 
-# Python 3.12 compatibility required
-# Pins versions that have wheels for Python 3.12+
+# Note: flashrank (0.2.0+) and unstructured (0.16+) removed
+# - Reason: Require Rust compilation (tokenizers, transformers, etc.)
+# - Workaround: RAG service gracefully falls back to RRF-only reranking
+# - FlashRank neural reranking is disabled but hybrid retrieval works
