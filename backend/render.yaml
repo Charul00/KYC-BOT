@@ -26,6 +26,10 @@ services:
         value: "0"
       - key: MAX_MEMORY_MESSAGES
         value: "5"
+      - key: MAX_TOKENS
+        value: "2048"
+      - key: FLASHRANK_CACHE_DIR
+        value: /tmp/flashrank
       - key: PYTHON_VERSION
         value: "3.13.2"
       - key: CARGO_HOME

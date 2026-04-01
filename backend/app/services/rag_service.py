@@ -158,7 +158,9 @@ class RAGService:
         """Initialize FlashRank re-ranker (lightweight, CPU-only)."""
         try:
             from flashrank import Ranker
-            self._reranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2", cache_dir="/tmp/flashrank")
+            cache_dir = os.environ.get("FLASHRANK_CACHE_DIR", "/tmp/flashrank")
+            os.makedirs(cache_dir, exist_ok=True)
+            self._reranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2", cache_dir=cache_dir)
             logger.info("FlashRank re-ranker loaded: ms-marco-MiniLM-L-12-v2")
         except Exception as e:
             logger.warning(f"FlashRank not available, falling back to basic ranking: {e}")
