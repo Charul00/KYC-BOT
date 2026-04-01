@@ -1,0 +1,71 @@
+KYC CHATBOT - ARCHITECTURE SUMMARY
+
+Project
+- Name: KYC Document Chatbot
+- Type: Production-level Hybrid RAG chatbot for KYC documents
+
+Core Stack
+- Backend: FastAPI + LangChain
+- Frontend: React + Tailwind + Vite
+- LLM: OpenAI GPT-4o
+- Embeddings: text-embedding-3-small
+- Vector DB: ChromaDB
+- Retrieval: Hybrid (Dense + Sparse) with Re-ranking
+
+High-Level Flow
+1. User sends query from frontend.
+2. FastAPI backend receives query.
+3. Hybrid retrieval pipeline runs:
+   - Dense retrieval via ChromaDB (semantic search)
+   - Sparse retrieval via BM25 (keyword search)
+4. Reciprocal Rank Fusion (RRF) merges dense and sparse results.
+5. FlashRank (ms-marco-MiniLM-L-12-v2) re-ranks merged candidates.
+6. Top relevant chunks are sent as context to GPT-4o.
+7. Final response + sources returned to UI.
+
+Retrieval Pipeline Details
+- Dense Search (ChromaDB)
+  - Uses OpenAI embeddings for semantic similarity.
+  - Captures intent and meaning beyond exact keywords.
+
+- Sparse Search (BM25)
+  - Uses lexical keyword matching and TF-IDF style scoring.
+  - Strong for exact terms, entities, and regulation keywords.
+
+- Fusion (RRF)
+  - Combines both result lists using reciprocal-rank scoring.
+  - Reduces bias of single retriever and improves robustness.
+
+- Re-ranking (FlashRank)
+  - Model: ms-marco-MiniLM-L-12-v2
+  - Lightweight CPU-friendly relevance re-ranker.
+  - Improves precision before final LLM response generation.
+
+Document Ingestion Flow
+1. Upload document (TXT/PDF/DOCX/MD)
+2. Validate and extract text
+3. Chunk text
+4. Generate embeddings
+5. Store in ChromaDB
+6. Build/refresh BM25 index for sparse retrieval
+
+Deployment Architecture
+- Frontend deployed on Vercel:
+  https://kyc-bot.vercel.app/
+- Backend API deployed on Render:
+  https://kyc-chatbot-api.onrender.com
+
+API Endpoints (Key)
+- POST /api/v1/chat
+- POST /api/v1/documents/upload
+- GET  /api/v1/documents
+- GET  /health
+
+Why This Architecture
+- Hybrid retrieval improves recall and robustness.
+- Re-ranking improves final context precision.
+- Guardrails + source-based responses reduce hallucination risk.
+- Suitable for enterprise KYC document Q&A scenarios.
+
+Repository
+https://github.com/Charul00/KYC-BOT

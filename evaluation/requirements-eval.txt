@@ -1,0 +1,21 @@
+# eClerx KYC Chatbot — Evaluation Dependencies
+# Install with: pip install -r requirements-eval.txt
+
+# Core evaluation framework
+ragas>=0.1.0,<0.3.0
+datasets>=2.14.0
+
+# LLM + embeddings (needed by RAGAS)
+openai>=1.50.0,<2.0.0
+langchain>=0.3.0,<0.4.0
+langchain-openai>=0.2.0,<0.3.0
+
+# HTTP client
+requests>=2.31.0
+
+# Data handling
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Environment variables
+python-dotenv>=1.0.0

@@ -2,12 +2,14 @@
 Chat API Router - Production-level endpoints.
 """
 
+import json
 import logging
 import uuid
 from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
 from openai import AuthenticationError
 
 from app.models.schemas import (
@@ -100,6 +102,71 @@ async def chat(request: ChatRequest):
             status_code=500,
             detail="Something went wrong while processing your question. Please try again.",
         )
+
+
+# ========================
+# Streaming Chat Endpoint (PRIMARY — low latency)
+# ========================
+
+@router.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Streaming SSE chat endpoint.
+    Sends tokens as they are generated — user sees first word in ~1s.
+    Protocol: text/event-stream, each line: data: <json>\n\n
+    Final event: {"done": true, "sources": [...], "query_type": "..."}
+    """
+    chat_history = memory_service.get_chat_history(request.session_id)
+    full_answer_tokens: List[str] = []
+
+    async def event_generator():
+        nonlocal full_answer_tokens
+        try:
+            async for chunk in rag_service.stream_answer(
+                query=request.query,
+                chat_history=chat_history,
+            ):
+                if chunk.get("done"):
+                    # Save full answer to memory before sending the done event
+                    full_answer = "".join(full_answer_tokens)
+                    try:
+                        memory_service.add_exchange(
+                            session_id=request.session_id,
+                            human_message=request.query,
+                            ai_message=full_answer,
+                        )
+                    except Exception as mem_err:
+                        logger.warning(f"Memory save failed: {mem_err}")
+
+                    logger.info(
+                        f"Stream complete | type={chunk.get('query_type')} | "
+                        f"len={len(full_answer)} | sources={len(chunk.get('sources', []))}"
+                    )
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                else:
+                    token = chunk.get("token", "")
+                    if token:
+                        full_answer_tokens.append(token)
+                    yield f"data: {json.dumps(chunk)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream generation error: {e}")
+            error_payload = {
+                "token": "Sorry, I encountered an error. Please try again.",
+                "done": False,
+            }
+            yield f"data: {json.dumps(error_payload)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'sources': [], 'query_type': 'SIMPLE'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",   # Disable Nginx buffering on Render
+        },
+    )
 
 
 # ========================

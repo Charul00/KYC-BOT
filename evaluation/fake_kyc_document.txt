@@ -1,0 +1,489 @@
+================================================================================
+ECLERX FINANCIAL SERVICES LIMITED
+KYC (KNOW YOUR CUSTOMER) POLICY & COMPLIANCE DOCUMENT
+Version 4.2 | Effective Date: January 1, 2024 | Confidential
+================================================================================
+
+SECTION 1: COMPANY OVERVIEW
+--------------------------------------------------------------------------------
+eClerx Financial Services Limited is a global KYC and compliance solutions
+provider headquartered at 1st Floor, Sonawala Building, 29 Bank Street,
+Fort, Mumbai - 400001, India. Incorporated in 2000 under the Companies Act,
+1956, eClerx provides data analytics, process management, and compliance
+services to leading financial institutions worldwide.
+
+CIN: L72200MH2000PLC125639
+GSTIN: 27AABCE1234F1Z5
+Registered Office: Mumbai, Maharashtra, India
+Global Offices: New York (USA), London (UK), Singapore, Chandigarh (India),
+                Pune (India), Sri City (India)
+
+eClerx serves over 60 Fortune 500 clients and employs more than 17,000
+professionals across its global delivery centers.
+
+SECTION 2: KYC POLICY OVERVIEW
+--------------------------------------------------------------------------------
+2.1 PURPOSE AND SCOPE
+
+This KYC Policy ("Policy") governs the processes by which eClerx Financial
+Services Limited and its subsidiaries ("eClerx", "the Company", "we") collect,
+verify, maintain, and manage customer identification information in accordance
+with applicable laws and regulations.
+
+The Policy applies to:
+(a) All new customer onboarding procedures
+(b) Periodic review of existing customer relationships
+(c) Enhanced Due Diligence (EDD) for high-risk customers
+(d) All employees, contractors, and third-party agents handling customer data
+
+2.2 REGULATORY FRAMEWORK
+
+eClerx operates in compliance with the following regulations:
+
+India:
+- Prevention of Money Laundering Act, 2002 (PMLA)
+- Reserve Bank of India (RBI) KYC Master Directions, 2016 (updated 2023)
+- Securities and Exchange Board of India (SEBI) KYC Registration Agency guidelines
+- Foreign Exchange Management Act (FEMA), 1999
+
+United States:
+- Bank Secrecy Act (BSA), 31 U.S.C. 5311 et seq.
+- USA PATRIOT Act, Section 326 (Customer Identification Program)
+- FinCEN Anti-Money Laundering regulations
+- OFAC (Office of Foreign Assets Control) compliance requirements
+
+United Kingdom:
+- Money Laundering, Terrorist Financing and Transfer of Funds Regulations 2017
+- Financial Conduct Authority (FCA) guidelines on financial crime
+- Proceeds of Crime Act 2002 (POCA)
+
+European Union:
+- 6th Anti-Money Laundering Directive (6AMLD)
+- GDPR (General Data Protection Regulation) – EU 2016/679
+- EBA Guidelines on Customer Due Diligence
+
+Singapore:
+- Monetary Authority of Singapore (MAS) Notice 626 on AML/CFT
+- Singapore Financial Reporting Standards
+
+SECTION 3: CUSTOMER IDENTIFICATION PROGRAM (CIP)
+--------------------------------------------------------------------------------
+3.1 REQUIRED IDENTIFICATION DOCUMENTS
+
+For INDIVIDUAL customers, eClerx requires:
+
+Primary Identity Documents (any one):
+- Passport (valid, not expired)
+- Aadhaar Card (12-digit unique identification number)
+- Voter Identity Card issued by Election Commission of India
+- Driving License (valid)
+- NREGA Job Card duly signed by State Government official
+- National Population Register Letter
+
+Address Proof Documents (any one):
+- Utility bill not more than 3 months old (electricity, telephone, water, gas)
+- Bank account statement not more than 3 months old
+- Letter from employer on letterhead
+- Rent agreement registered with government authority
+
+Financial Documents:
+- PAN Card (mandatory for transactions above INR 50,000)
+- Form 60/61 (for individuals without PAN)
+- Income Tax Returns for last 2 years (for high-value transactions)
+- Salary slips for last 3 months (for salaried individuals)
+
+For CORPORATE/INSTITUTIONAL customers, eClerx requires:
+- Certificate of Incorporation
+- Memorandum and Articles of Association
+- Board Resolution authorizing account opening
+- List of Directors with their KYC documents
+- Beneficial Ownership Declaration (for ownership > 25%)
+- Audited financial statements for last 2 years
+- GST Registration Certificate
+- Latest annual return filed with Registrar of Companies
+
+For FOREIGN NATIONAL customers:
+- Valid Passport (mandatory)
+- Visa documentation
+- Work Permit or Residence Permit
+- Foreign address proof (utility bill or bank statement)
+- Home country identity document
+
+3.2 DOCUMENT VALIDITY AND STANDARDS
+
+All submitted documents must meet the following standards:
+- Documents must be self-attested by the customer
+- Photographs must be clear and recent (not older than 6 months)
+- All documents must be in English or accompanied by certified translation
+- Expired documents are not acceptable under any circumstance
+- Certified true copies accepted only from gazetted officers, notaries, or bank officials
+- Original documents must be presented for in-person verification
+
+3.3 DIGITAL KYC (eKYC)
+
+eClerx supports Aadhaar-based eKYC through UIDAI's Digilocker platform:
+- OTP-based eKYC: Customer provides Aadhaar number and authenticates via OTP
+- Biometric eKYC: Authentication via fingerprint or iris scan at authorized centers
+- Video KYC (V-CIP): Live video interaction with trained eClerx officials
+- Consent is mandatory and must be recorded electronically
+
+eKYC Limitations:
+- Maximum transaction limit for OTP-based eKYC: INR 1,00,000 per year
+- Biometric-based eKYC: No transaction limit (subject to risk assessment)
+- V-CIP applicable for full KYC completion remotely
+
+SECTION 4: CUSTOMER DUE DILIGENCE (CDD) FRAMEWORK
+--------------------------------------------------------------------------------
+4.1 RISK CATEGORIZATION
+
+eClerx classifies customers into three risk tiers:
+
+LOW RISK:
+- Salaried government employees
+- Individuals with regulated income sources
+- Public sector undertaking employees
+- Transaction values consistently below INR 1,00,000 per month
+- Customers with established 3+ year relationship and clean transaction history
+
+MEDIUM RISK:
+- Self-employed professionals (doctors, lawyers, CAs)
+- Small business owners
+- Non-resident Indians (NRIs)
+- Customers with moderate-value transactions (INR 1,00,000 – 10,00,000/month)
+- First-time customers without prior banking relationship
+
+HIGH RISK:
+- Politically Exposed Persons (PEPs) and their family members
+- Non-resident entities from high-risk jurisdictions
+- Cash-intensive businesses (jewelers, dealers, real estate)
+- Customers subject to adverse media or negative news
+- Transactions above INR 10,00,000 per month
+- Customers dealing in virtual assets/cryptocurrency
+- Shell companies or complex ownership structures
+
+4.2 SIMPLIFIED DUE DILIGENCE (SDD)
+Applicable only to Low Risk customers:
+- Basic ID and address verification required
+- Reduced document set acceptable
+- Annual review cycle (vs quarterly for high-risk)
+- Self-declaration of income acceptable up to INR 5,00,000
+
+4.3 STANDARD DUE DILIGENCE (SDD)
+For Medium Risk customers:
+- Full ID, address, and income verification
+- Source of funds declaration required
+- Semi-annual review
+- Face-to-face verification or V-CIP mandatory
+
+4.4 ENHANCED DUE DILIGENCE (EDD)
+For High Risk customers:
+- All standard documents plus additional scrutiny
+- Senior management approval required for onboarding
+- Source of wealth documentation mandatory
+- Quarterly account review
+- Ongoing transaction monitoring
+- Third-party database screening (OFAC, UN, EU sanctions lists)
+- Negative media check (World-Check, LexisNexis)
+
+SECTION 5: POLITICALLY EXPOSED PERSONS (PEPs)
+--------------------------------------------------------------------------------
+5.1 DEFINITION
+
+A Politically Exposed Person (PEP) is an individual who is or has been
+entrusted with prominent public functions, including:
+
+- Heads of State or government
+- Senior government ministers
+- Senior judicial officials (High Court, Supreme Court)
+- Senior executives of state-owned enterprises
+- Senior officials of political parties
+- Members of Parliament or legislative assemblies
+- Senior military officials (rank of Brigadier or above)
+- Ambassadors and high commissioners
+- Directors and senior management of international organizations
+
+Domestic PEPs: Senior officials within India
+Foreign PEPs: Officials from outside India
+International Organization PEPs: Officials of UN, IMF, World Bank, etc.
+
+5.2 PEP-RELATED REQUIREMENTS
+
+- Immediate family members and close associates of PEPs are treated as PEPs
+- All PEP accounts require approval from the Chief Compliance Officer (CCO)
+- Continuous monitoring of PEP accounts is mandatory
+- PEP status must be re-verified every 12 months
+- Source of wealth and source of funds must be documented in detail
+- Unusual transaction patterns must be reported to FIU-IND within 7 days
+
+SECTION 6: ANTI-MONEY LAUNDERING (AML) PROCEDURES
+--------------------------------------------------------------------------------
+6.1 TRANSACTION MONITORING
+
+eClerx employs an automated Transaction Monitoring System (TMS) with the
+following alert thresholds:
+
+Cash Transactions:
+- Cash deposits or withdrawals above INR 10,00,000 in a single day
+- Multiple cash transactions aggregating INR 10,00,000 or more in a day
+- Cross-border wire transfers above USD 10,000 (or equivalent)
+
+Suspicious Patterns:
+- Rapid movement of funds in and out (round-tripping)
+- Structuring transactions to avoid reporting thresholds (smurfing)
+- Transactions with no apparent business purpose
+- Sudden change in transaction pattern inconsistent with customer profile
+- Transactions with sanctioned countries, entities, or individuals
+
+6.2 SUSPICIOUS ACTIVITY REPORTS (SAR/STR)
+
+eClerx is required to file Suspicious Transaction Reports (STRs) with
+FIU-IND (Financial Intelligence Unit - India) in the following cases:
+- Transactions involving proceeds of crime
+- Transactions that may be linked to terrorism financing
+- Transactions inconsistent with the customer's known business/income
+- Unusual urgency or secrecy in transaction requests
+
+Filing Timeline:
+- STR must be filed within 7 working days of suspicion being raised
+- Cash Transaction Report (CTR): Filed within 15 days of month-end
+- No obligation to inform the customer that a report has been filed
+- "Tipping off" a customer about an STR is a criminal offense
+
+6.3 SANCTIONS SCREENING
+
+eClerx screens all customers and transactions against:
+- UN Security Council consolidated list
+- OFAC SDN (Specially Designated Nationals) list
+- EU Consolidated Sanctions List
+- HMT (UK) Consolidated List of Financial Sanctions Targets
+- RBI caution list
+- INTERPOL notices
+
+Frequency of screening:
+- New customers: screened before onboarding
+- Existing customers: screened in real-time for each transaction
+- Full database refresh against updated sanctions lists: daily
+
+SECTION 7: RECORD KEEPING AND DATA RETENTION
+--------------------------------------------------------------------------------
+7.1 RETENTION PERIODS
+
+Customer Identification Records:
+- Identity and address documents: 5 years after account closure
+- Transaction records: 5 years from the date of transaction
+- STR/CTR filings: 5 years from the date of filing
+- Training records: 3 years
+
+Electronic Records:
+- All KYC records must be stored in tamper-proof electronic format
+- Backup copies maintained at geographically separate data centers
+- Records must be retrievable within 48 hours of regulatory request
+
+7.2 DATA PROTECTION
+
+In accordance with India's Personal Data Protection Bill and GDPR:
+- Customer data processed only for stated KYC/AML purposes
+- Data not shared with third parties without explicit consent (except regulatory requirements)
+- Customers have right to access their data
+- Data breaches must be reported to relevant authority within 72 hours
+
+SECTION 8: COMPLIANCE CERTIFICATIONS AND AUDIT
+--------------------------------------------------------------------------------
+8.1 CERTIFICATIONS HELD
+
+eClerx holds the following compliance certifications:
+- ISO 27001:2022 – Information Security Management System
+- SOC 2 Type II – Security, Availability, and Confidentiality
+- PCI DSS Level 1 – Payment Card Industry Data Security Standard
+- ISO 9001:2015 – Quality Management System
+- CMMI Level 5 – Capability Maturity Model Integration
+- CSA STAR Level 2 – Cloud Security Alliance certification
+
+8.2 INTERNAL AUDIT
+
+- KYC compliance audits conducted quarterly by Internal Audit team
+- Annual external audit by PricewaterhouseCoopers (PwC) India
+- Regulatory examination by RBI, SEBI as applicable
+- Board-level Audit Committee reviews findings semi-annually
+
+8.3 TRAINING REQUIREMENTS
+
+All employees handling KYC processes must complete:
+- Annual AML/KYC awareness training (mandatory, minimum 4 hours)
+- Role-specific training for KYC analysts (minimum 16 hours/year)
+- New employee induction training within 30 days of joining
+- Refresher training within 7 days of significant regulatory changes
+
+SECTION 9: TECHNOLOGY PLATFORMS
+--------------------------------------------------------------------------------
+9.1 KYC TECHNOLOGY STACK
+
+eClerx uses the following proprietary and third-party platforms:
+
+CLX Platform (Proprietary):
+- End-to-end KYC workflow automation
+- AI/ML-powered document verification
+- Automated ID extraction and validation
+- Real-time sanctions screening integration
+- Case management with audit trail
+
+Third-Party Integrations:
+- UIDAI Digilocker: Aadhaar-based eKYC verification
+- Bureau van Dijk Orbis: Corporate beneficial ownership data
+- World-Check One (Refinitiv): PEP and sanctions screening
+- LexisNexis Risk Solutions: Adverse media monitoring
+- Trulioo: Global identity verification for international customers
+
+9.2 DATA SECURITY ARCHITECTURE
+
+- AES-256 encryption for data at rest
+- TLS 1.3 for data in transit
+- Zero-trust network architecture
+- Multi-factor authentication for all system access
+- Role-based access control (RBAC)
+- Quarterly penetration testing by certified third party
+- 24/7 Security Operations Center (SOC) monitoring
+
+SECTION 10: ACCOUNT TYPES AND SPECIAL CATEGORIES
+--------------------------------------------------------------------------------
+10.1 MINOR ACCOUNTS
+
+Accounts for minors (below 18 years):
+- Natural guardian (parent) must be joint account holder
+- Birth certificate of minor mandatory
+- Guardian's full KYC documents required
+- Account automatically reviewed when minor turns 18
+- No debit card facility until customer turns 18
+
+10.2 JOINT ACCOUNTS
+
+- KYC for ALL joint account holders mandatory
+- Survivorship clause must be clearly stated
+- Either/Survivor or Former/Survivor operating instructions documented
+
+10.3 NON-RESIDENT INDIAN (NRI) ACCOUNTS
+
+Account types available:
+- NRE (Non-Resident External) Account: Repatriable, held in INR
+- NRO (Non-Resident Ordinary) Account: Non-repatriable, held in INR
+- FCNR (Foreign Currency Non-Resident) Account: In foreign currency
+
+Additional documents required:
+- Valid passport with valid visa
+- Proof of residence abroad (utility bill or bank statement from foreign country)
+- FEMA declaration form
+- PAN card (mandatory for NRIs with Indian income)
+
+10.4 DORMANT ACCOUNTS
+
+An account is classified as dormant if:
+- No customer-initiated transactions for 24 consecutive months
+- Prior to dormancy classification, eClerx must:
+  (a) Send 2 written notices to customer's registered address
+  (b) Send email and SMS alerts
+  (c) Attempt phone contact
+
+Dormant account activation:
+- Fresh KYC documents required
+- In-person verification at branch or V-CIP
+
+SECTION 11: BENEFICIAL OWNERSHIP
+--------------------------------------------------------------------------------
+11.1 DEFINITION OF BENEFICIAL OWNER
+
+A Beneficial Owner is any individual who:
+- Holds 25% or more equity/ownership in a company
+- Exercises ultimate effective control over the entity
+- Provides the majority of funds or assets to the entity
+
+11.2 BENEFICIAL OWNERSHIP REQUIREMENTS
+
+For all legal entities:
+- UBO (Ultimate Beneficial Owner) declaration mandatory
+- Ownership structure must be traced to natural persons
+- Complex structures (more than 3 layers) require additional documentation
+- Nominee shareholders must declare the actual beneficial owner
+- Trust accounts: Settlor, trustee, and beneficiaries must all be identified
+
+11.3 CORPORATE TRANSPARENCY
+
+eClerx maintains a Central KYC (CKYC) record for all customers through:
+- CERSAI (Central Registry of Securitisation Asset Reconstruction)
+- KYC Registration Agencies (KRAs) as approved by SEBI
+- Interoperability with CKYC registry for customer convenience
+
+SECTION 12: GRIEVANCE REDRESSAL
+--------------------------------------------------------------------------------
+12.1 CUSTOMER GRIEVANCES
+
+Customers may raise KYC-related grievances through:
+- Email: kyc-grievances@eclerx.com
+- Phone: +91-22-6614-6200 (Monday to Friday, 9:00 AM to 6:00 PM IST)
+- Written complaint to: Chief Compliance Officer, eClerx Financial Services,
+  29 Bank Street, Fort, Mumbai - 400001
+- Online portal: https://compliance.eclerx.com/grievances
+
+12.2 RESOLUTION TIMELINE
+
+- Acknowledgement of complaint: Within 3 business days
+- Resolution for standard complaints: Within 30 days
+- Escalation to Ombudsman: If not resolved within 30 days
+- KYC-related disputes with banks: RBI Banking Ombudsman
+
+SECTION 13: PERIODIC REVIEW AND UPDATES
+--------------------------------------------------------------------------------
+13.1 KYC RENEWAL CYCLES
+
+Risk-Based Review Schedule:
+- Low Risk customers: Once every 10 years
+- Medium Risk customers: Once every 8 years
+- High Risk customers: Once every 2 years
+- PEPs: Once every 1 year (annual)
+
+Trigger-Based Review (immediate review required):
+- Change in customer's address, name, or contact details
+- Change in business nature or ownership structure
+- Transaction patterns inconsistent with risk profile
+- Adverse media reports or negative news
+- Customer appears on sanctions list
+- Upon request from regulatory authority
+
+13.2 POLICY REVIEW
+
+This policy is reviewed:
+- Annually by the Chief Compliance Officer
+- Upon significant regulatory changes
+- Upon material changes to business operations
+- Following significant risk events
+
+Last Policy Review: December 15, 2023
+Next Scheduled Review: December 15, 2024
+Approved by: Board of Directors, January 1, 2024
+
+SECTION 14: GLOSSARY
+--------------------------------------------------------------------------------
+AML    - Anti-Money Laundering
+CDD    - Customer Due Diligence
+CIP    - Customer Identification Program
+CTR    - Cash Transaction Report
+EDD    - Enhanced Due Diligence
+eKYC   - Electronic Know Your Customer
+FEMA   - Foreign Exchange Management Act
+FIU    - Financial Intelligence Unit
+GDPR   - General Data Protection Regulation
+KYC    - Know Your Customer
+OFAC   - Office of Foreign Assets Control
+PEP    - Politically Exposed Person
+PMLA   - Prevention of Money Laundering Act
+RBI    - Reserve Bank of India
+SEBI   - Securities and Exchange Board of India
+STR    - Suspicious Transaction Report
+TMS    - Transaction Monitoring System
+UBO    - Ultimate Beneficial Owner
+UIDAI  - Unique Identification Authority of India
+V-CIP  - Video based Customer Identification Process
+
+================================================================================
+DOCUMENT CLASSIFICATION: CONFIDENTIAL – INTERNAL USE ONLY
+eClerx Financial Services Limited | Version 4.2 | 2024
+================================================================================

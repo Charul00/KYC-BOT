@@ -10,7 +10,7 @@ export default function Sidebar({ isOpen, sessions, activeSession, onNewChat, on
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-white">
-              <img src="/logo_e.png" alt="eClerx" className="h-4" />
+              <img src="/logo_e.png" alt="eClerx" className="h-4" onError={e => { e.target.style.display='none' }} />
             </div>
             <div>
               <span className="font-bold text-white text-sm">eClerx</span>
@@ -28,8 +28,8 @@ export default function Sidebar({ isOpen, sessions, activeSession, onNewChat, on
           onClick={onNewChat}
           className="w-full px-3 py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 text-white transition-colors"
           style={{ backgroundColor: '#2563eb' }}
-          onMouseOver={e => e.target.style.backgroundColor = '#1d4ed8'}
-          onMouseOut={e => e.target.style.backgroundColor = '#2563eb'}
+          onMouseOver={e => e.currentTarget.style.backgroundColor = '#1d4ed8'}
+          onMouseOut={e => e.currentTarget.style.backgroundColor = '#2563eb'}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -48,9 +48,7 @@ export default function Sidebar({ isOpen, sessions, activeSession, onNewChat, on
             {[...sessions].reverse().map(session => (
               <div
                 key={session.id}
-                className={`group flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-all ${
-                  activeSession === session.id ? 'text-white' : 'hover:text-white'
-                }`}
+                className={`group flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-all`}
                 style={{
                   backgroundColor: activeSession === session.id ? 'rgba(37,99,235,0.2)' : 'transparent',
                   color: activeSession === session.id ? '#fff' : '#94a3c3',
@@ -83,8 +81,8 @@ export default function Sidebar({ isOpen, sessions, activeSession, onNewChat, on
           onClick={onShowUpload}
           className="w-full px-3 py-2.5 rounded-lg text-sm flex items-center gap-2 transition-colors"
           style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: '#94a3c3' }}
-          onMouseOver={e => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
-          onMouseOut={e => e.target.style.backgroundColor = 'rgba(255,255,255,0.05)'}
+          onMouseOver={e => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+          onMouseOut={e => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />

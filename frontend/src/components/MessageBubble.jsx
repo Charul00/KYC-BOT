@@ -1,12 +1,44 @@
 import React, { useState } from 'react'
 
+// ── Copy to clipboard helper
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {}
+  }
+  return (
+    <button
+      onClick={copy}
+      title="Copy to clipboard"
+      className="copy-btn opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all hover:bg-slate-100"
+      style={{ color: copied ? '#16a34a' : '#94a3b8' }}
+    >
+      {copied ? (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 export default function MessageBubble({ message }) {
   const [showSources, setShowSources] = useState(false)
-  const isUser = message.role === 'user'
-  const isError = message.isError
+  const isUser     = message.role === 'user'
+  const isError    = message.isError
+  const isStreaming = message.streaming === true   // actively receiving tokens
 
   return (
-    <div className={`flex gap-3 mb-4 message-enter ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex gap-3 mb-4 message-enter group ${isUser ? 'flex-row-reverse' : ''}`}>
+
       {/* Avatar */}
       <div
         className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
@@ -27,12 +59,20 @@ export default function MessageBubble({ message }) {
       </div>
 
       {/* Content */}
-      <div className={`max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
-        {/* Label */}
-        <p className={`text-xs font-medium mb-1 ${isUser ? 'text-right' : ''}`} style={{ color: '#64748b' }}>
-          {isUser ? 'You' : 'eClerx KYC Assistant'}
-        </p>
+      <div className={`max-w-[80%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
 
+        {/* Label row */}
+        <div className={`flex items-center gap-2 mb-1 ${isUser ? 'flex-row-reverse' : ''}`}>
+          <p className="text-xs font-medium" style={{ color: '#64748b' }}>
+            {isUser ? 'You' : 'eClerx KYC Assistant'}
+          </p>
+          {/* Copy button — only when AI message is complete */}
+          {!isUser && !isError && !isStreaming && message.content && (
+            <CopyButton text={message.content} />
+          )}
+        </div>
+
+        {/* Bubble */}
         <div
           className={`rounded-2xl px-4 py-3 ${
             isUser
@@ -43,18 +83,27 @@ export default function MessageBubble({ message }) {
           }`}
           style={isUser ? { backgroundColor: '#2563eb' } : {}}
         >
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+            {message.content}
+            {/* Real streaming cursor — shown while tokens are actively arriving */}
+            {!isUser && !isError && isStreaming && (
+              <span className="typing-cursor">▍</span>
+            )}
+          </p>
         </div>
 
-        {/* Sources */}
-        {!isUser && message.sources && message.sources.length > 0 && (
+        {/* Sources — only shown after streaming is complete */}
+        {!isUser && !isError && !isStreaming && message.sources && message.sources.length > 0 && (
           <div className="mt-1.5">
             <button
               onClick={() => setShowSources(!showSources)}
               className="text-xs flex items-center gap-1 transition-colors"
               style={{ color: '#2563eb' }}
             >
-              <svg className={`w-3 h-3 transition-transform ${showSources ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg
+                className={`w-3 h-3 transition-transform ${showSources ? 'rotate-90' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
               {message.sources.length} source{message.sources.length > 1 ? 's' : ''} referenced
