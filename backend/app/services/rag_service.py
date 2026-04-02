@@ -10,6 +10,7 @@ Goals:
 1. Keep greetings instant
 2. Make simple factual lookups fast
 3. Preserve deeper reasoning for analyst-style questions
+4. Reduce latency safely without hurting answer quality too much
 """
 
 import os
@@ -47,10 +48,10 @@ RETRIEVAL_CONFIG = {
     "GREETING":      {"top_k": 0, "skip_retrieval": True,  "use_fast_llm": True},
     "OUT_OF_SCOPE":  {"top_k": 0, "skip_retrieval": True,  "use_fast_llm": True},
     "LOOKUP":        {"top_k": 2, "skip_retrieval": False, "use_fast_llm": True},
-    "SIMPLE":        {"top_k": 4, "skip_retrieval": False, "use_fast_llm": True},
-    "COMPLEX":       {"top_k": 8, "skip_retrieval": False, "use_fast_llm": False},
-    "TRICKY":        {"top_k": 8, "skip_retrieval": False, "use_fast_llm": False},
-    "ADVERSARIAL":   {"top_k": 6, "skip_retrieval": False, "use_fast_llm": False},
+    "SIMPLE":        {"top_k": 3, "skip_retrieval": False, "use_fast_llm": True},
+    "COMPLEX":       {"top_k": 4, "skip_retrieval": False, "use_fast_llm": False},
+    "TRICKY":        {"top_k": 4, "skip_retrieval": False, "use_fast_llm": False},
+    "ADVERSARIAL":   {"top_k": 4, "skip_retrieval": False, "use_fast_llm": False},
 }
 
 GREETING_PATTERNS = re.compile(
@@ -117,7 +118,7 @@ class RAGService:
             streaming=True,
         )
 
-        # Fast model for greetings / simple lookups
+        # Fast model for greetings / lookups / simple factual answers
         self._llm_fast = ChatOpenAI(
             model_name="gpt-4o-mini",
             temperature=settings.TEMPERATURE,
@@ -265,7 +266,6 @@ class RAGService:
     def _is_case_or_customer_query(self, query: str) -> bool:
         """
         Detect broader case-analysis questions.
-        These can use the stronger reasoning model.
         """
         query_lower = query.lower()
         keywords = [
@@ -274,7 +274,7 @@ class RAGService:
             "transactions", "review", "high risk", "low risk", "anomaly",
             "manual review", "flag", "flagged", "suspicious",
             "explain the case", "summarize the case", "should this be flagged",
-            "what checks", "next steps", "monitoring", "pk yc", "pkyc"
+            "what checks", "next steps", "monitoring", "pkyc", "perpetual kyc"
         ]
         return any(keyword in query_lower for keyword in keywords)
 
@@ -291,6 +291,7 @@ class RAGService:
 
         lookup_patterns = [
             r"^who is\s+cust-\d+\??$",
+            r"^who is\s+customer\s+cust-\d+\??$",
             r"^what is\s+onboarding duration\??$",
             r"^what is\s+the onboarding duration\??$",
             r"^what is\s+occupation\??$",
@@ -303,8 +304,6 @@ class RAGService:
             r"^what is\s+the location\??$",
             r"^what is\s+onboarding channel\??$",
             r"^what is\s+the onboarding channel\??$",
-            r"^who is\s+customer\s+cust-\d+\??$",
-            r"^who is\s+customer\s+[a-z0-9\-]+\??$",
         ]
 
         return any(re.match(pattern, q) for pattern in lookup_patterns)
@@ -343,8 +342,7 @@ class RAGService:
             response = self._llm_classifier.invoke(prompt)
             category = response.content.strip().upper().replace(" ", "_")
             category = category if category in RETRIEVAL_CONFIG else "SIMPLE"
-            category = self._resolve_query_type(category, query)
-            return category
+            return self._resolve_query_type(category, query)
         except Exception as e:
             logger.warning(f"Classification failed, defaulting to SIMPLE: {e}")
             return self._resolve_query_type("SIMPLE", query)
@@ -367,8 +365,7 @@ class RAGService:
 
     def _rewrite_query(self, query: str, chat_history: List[Tuple[str, str]]) -> str:
         """
-        Sync rewrite — used by non-streaming path.
-        Skip rewrite for exact lookup queries.
+        Sync rewrite — skip rewrite for exact lookup queries.
         """
         if self._is_lookup_query(query):
             return query
@@ -408,7 +405,7 @@ class RAGService:
             return query
 
     async def _rewrite_query_async(self, query: str, chat_history: List[Tuple[str, str]]) -> str:
-        """Async rewrite — streaming path. Skip rewrite for exact lookup queries."""
+        """Async rewrite — skip rewrite for exact lookup queries."""
         if self._is_lookup_query(query):
             return query
 
@@ -507,8 +504,7 @@ class RAGService:
     def _lookup_search(self, query: str, k: int = 2) -> List[Document]:
         """
         Lightweight retrieval for exact factual questions.
-        No rerank, smaller fetch window.
-        Prefer BM25 exact term matching, then blend with dense.
+        No rerank, small fetch window.
         """
         dense_results = self._vector_store.similarity_search(query, k=max(k, 2))
         bm25_results = self._bm25_search(query, k=max(k, 2))
@@ -541,20 +537,24 @@ class RAGService:
         return dense_results[:k]
 
     def hybrid_search(self, query: str, k: int = None) -> List[Document]:
-        """Sync hybrid retrieval (legacy path)."""
+        """Sync hybrid retrieval for reasoning-heavy questions."""
         k = k or settings.TOP_K_RESULTS
-        fetch_k = max(k * 2, 8)
+        fetch_k = min(max(k + 2, 4), 6)  # safe reduced fetch window
         dense_results = self._vector_store.similarity_search(query, k=fetch_k)
         bm25_results = self._bm25_search(query, k=fetch_k)
         bm25_docs = [doc for doc, _ in bm25_results]
         merged = self._rrf_merge(dense_results, bm25_docs, fetch_k)
+
+        # cap rerank input
+        merged = merged[:6]
+
         final = self._rerank(query, merged, top_k=k)
         logger.info(f"Hybrid: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(final)} final")
         return final
 
     async def _hybrid_search_async(self, query: str, k: int) -> List[Document]:
         """Async hybrid retrieval for reasoning-heavy questions."""
-        fetch_k = max(k * 2, 8)
+        fetch_k = min(max(k + 2, 4), 6)  # safe reduced fetch window
 
         dense_task = self._vector_store.asimilarity_search(query, k=fetch_k)
         bm25_results = self._bm25_search(query, k=fetch_k)
@@ -562,6 +562,10 @@ class RAGService:
 
         bm25_docs = [doc for doc, _ in bm25_results]
         merged = self._rrf_merge(dense_results, bm25_docs, fetch_k)
+
+        # cap rerank input
+        merged = merged[:6]
+
         final = self._rerank(query, merged, top_k=k)
 
         logger.info(f"Async hybrid: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(final)} final")
