@@ -7,6 +7,11 @@ Latency optimizations:
   2. Async pipeline: ainvoke/astream throughout, no event-loop blocking
   3. Model routing: gpt-4o-mini for SIMPLE queries (3–4x faster)
   4. Parallel: classify + BM25 run concurrently via asyncio.gather
+
+Behavior improvements:
+  1. Case/customer-style queries are routed to stronger reasoning model
+  2. SIMPLE retrieval expanded slightly for better cross-chunk grounding
+  3. Analyst-style answers rely on improved QA_PROMPT
 """
 
 import os
@@ -43,8 +48,8 @@ def _tokenize(text: str) -> List[str]:
 RETRIEVAL_CONFIG = {
     "GREETING":      {"top_k": 0,  "skip_retrieval": True,  "use_fast_llm": True},
     "OUT_OF_SCOPE":  {"top_k": 0,  "skip_retrieval": True,  "use_fast_llm": True},
-    "SIMPLE":        {"top_k": 4,  "skip_retrieval": False, "use_fast_llm": True},   # gpt-4o-mini: 3-4x faster
-    "COMPLEX":       {"top_k": 8,  "skip_retrieval": False, "use_fast_llm": False},  # gpt-4o: better reasoning
+    "SIMPLE":        {"top_k": 6,  "skip_retrieval": False, "use_fast_llm": True},   # Increased from 4 -> 6
+    "COMPLEX":       {"top_k": 8,  "skip_retrieval": False, "use_fast_llm": False},
     "TRICKY":        {"top_k": 8,  "skip_retrieval": False, "use_fast_llm": False},
     "ADVERSARIAL":   {"top_k": 6,  "skip_retrieval": False, "use_fast_llm": False},
 }
@@ -67,6 +72,7 @@ class RAGService:
     6. Adaptive context window per query type
     7. SSE streaming for low-latency UX
     8. gpt-4o-mini routing for SIMPLE queries
+    9. Special routing for case/customer/risk-style questions
     """
 
     def __init__(self):
@@ -74,7 +80,7 @@ class RAGService:
         self._vector_store: Optional[Chroma] = None
         self._llm: Optional[ChatOpenAI] = None
         self._llm_fast: Optional[ChatOpenAI] = None
-        self._llm_classifier: Optional[ChatOpenAI] = None   # BUG FIX: declare in __init__
+        self._llm_classifier: Optional[ChatOpenAI] = None
         self._text_splitter: Optional[RecursiveCharacterTextSplitter] = None
         self._qa_chain: Optional[ConversationalRetrievalChain] = None
         self._reranker = None
@@ -111,32 +117,31 @@ class RAGService:
         # 3. ChromaDB vector store
         self._init_vector_store()
 
-        # 4. FlashRank re-ranker (lightweight, no GPU needed)
+        # 4. FlashRank re-ranker (lightweight, CPU-only)
         self._init_reranker()
 
         # 5. BM25 index
         self._rebuild_bm25_index()
 
-        # 6. Main LLM — gpt-4o for COMPLEX/TRICKY/ADVERSARIAL
+        # 6. Main LLM — use for complex reasoning / case analysis
         self._llm = ChatOpenAI(
             model_name=settings.MODEL_NAME,
             temperature=settings.TEMPERATURE,
             max_tokens=settings.MAX_TOKENS,
             openai_api_key=settings.OPENAI_API_KEY,
-            streaming=True,  # Enable streaming support
+            streaming=True,
         )
 
-        # 7. Fast LLM — gpt-4o-mini for SIMPLE queries + classification/rewriting
-        #    3–4x faster & cheaper than gpt-4o for straightforward questions
+        # 7. Fast LLM — use for lightweight/simple factual queries
         self._llm_fast = ChatOpenAI(
             model_name="gpt-4o-mini",
             temperature=settings.TEMPERATURE,
             max_tokens=settings.MAX_TOKENS,
             openai_api_key=settings.OPENAI_API_KEY,
-            streaming=True,  # Enable streaming support
+            streaming=True,
         )
 
-        # 8. Fast LLM for classification only (tiny output, low latency)
+        # 8. Fast LLM for classification only
         self._llm_classifier = ChatOpenAI(
             model_name="gpt-4o-mini",
             temperature=0.0,
@@ -213,6 +218,7 @@ class RAGService:
     def _load_default_documents(self):
         """Load documents from the default directory on cold start."""
         from pathlib import Path
+
         docs_dir = Path(settings.DOCUMENTS_DIR)
         if not docs_dir.exists():
             logger.warning(f"Documents directory not found: {docs_dir}")
@@ -223,20 +229,25 @@ class RAGService:
             if file_path.suffix in [".txt", ".md"]:
                 logger.info(f"Loading: {file_path.name}")
                 content = file_path.read_text(encoding="utf-8")
-                documents.append(Document(
-                    page_content=content,
-                    metadata={"source": file_path.name, "file_type": file_path.suffix},
-                ))
+                documents.append(
+                    Document(
+                        page_content=content,
+                        metadata={"source": file_path.name, "file_type": file_path.suffix},
+                    )
+                )
             elif file_path.suffix == ".pdf":
                 logger.info(f"Loading PDF: {file_path.name}")
                 try:
                     from pypdf import PdfReader
+
                     reader = PdfReader(str(file_path))
                     text = "\n".join(p.extract_text() or "" for p in reader.pages)
-                    documents.append(Document(
-                        page_content=text,
-                        metadata={"source": file_path.name, "file_type": ".pdf"},
-                    ))
+                    documents.append(
+                        Document(
+                            page_content=text,
+                            metadata={"source": file_path.name, "file_type": ".pdf"},
+                        )
+                    )
                 except Exception as e:
                     logger.error(f"Error loading PDF {file_path.name}: {e}")
 
@@ -265,6 +276,34 @@ class RAGService:
         return len(chunks)
 
     # ==========================================
+    # Query Intelligence Helpers
+    # ==========================================
+
+    def _is_case_or_customer_query(self, query: str) -> bool:
+        """
+        Detect questions that look like case analysis / customer profile / risk review.
+        These should use the stronger reasoning model even if classifier says SIMPLE.
+        """
+        query_lower = query.lower()
+        keywords = [
+            "customer", "cust-", "case", "profile", "risk", "alert",
+            "onboarding", "document", "documents", "pep", "adverse media",
+            "source of wealth", "mule", "transaction", "transactions",
+            "review", "kyc", "high risk", "low risk", "anomaly",
+            "manual review", "flag", "flagged", "suspicious"
+        ]
+        return any(keyword in query_lower for keyword in keywords)
+
+    def _select_answer_llm(self, query: str, config: dict):
+        """
+        Use fast model for ordinary simple factual queries,
+        but use stronger model for customer/case/risk-style questions.
+        """
+        if config["use_fast_llm"] and not self._is_case_or_customer_query(query):
+            return self._llm_fast
+        return self._llm
+
+    # ==========================================
     # Query Classification & Rewriting (Async)
     # ==========================================
 
@@ -282,7 +321,7 @@ class RAGService:
             return "SIMPLE"
 
     async def _classify_query_async(self, query: str) -> str:
-        """Async classify — used by the streaming path. No event-loop blocking."""
+        """Async classify — used by the streaming path."""
         if GREETING_PATTERNS.match(query.strip()):
             return "GREETING"
         try:
@@ -296,26 +335,36 @@ class RAGService:
             return "SIMPLE"
 
     def _rewrite_query(self, query: str, chat_history: List[Tuple[str, str]]) -> str:
-        """Sync rewrite — legacy path.
-        BUG FIX: use _llm_fast (max_tokens=1024) NOT _llm_classifier (max_tokens=15).
-        A rewritten query can be 20-50 tokens; 15 would silently truncate it.
+        """
+        Sync rewrite — used by non-streaming path.
+        Uses _llm_fast because rewrite may require more than classifier token budget.
         """
         if not chat_history:
             return query
-        follow_up_markers = ["it", "that", "this", "those", "these", "they", "them",
-                             "same", "above", "previous", "also", "what about", "and the",
-                             "how about", "is there", "what's"]
+
+        follow_up_markers = [
+            "it", "that", "this", "those", "these", "they", "them",
+            "same", "above", "previous", "also", "what about", "and the",
+            "how about", "is there", "what's"
+        ]
         query_lower = query.lower()
         needs_rewrite = any(marker in query_lower for marker in follow_up_markers)
+
         if not needs_rewrite and len(query.split()) > 5:
             return query
+
         try:
             history_str = ""
             for human, ai in chat_history[-3:]:
                 history_str += f"Human: {human}\nAI: {ai[:200]}\n\n"
-            prompt = CONDENSE_QUESTION_PROMPT.format(chat_history=history_str, question=query)
-            response = self._llm_fast.invoke(prompt)   # _llm_fast has proper token budget
+
+            prompt = CONDENSE_QUESTION_PROMPT.format(
+                chat_history=history_str,
+                question=query
+            )
+            response = self._llm_fast.invoke(prompt)
             rewritten = response.content.strip()
+
             if rewritten and len(rewritten) > 3:
                 logger.info(f"Query rewritten: '{query}' → '{rewritten}'")
                 return rewritten
@@ -325,25 +374,33 @@ class RAGService:
             return query
 
     async def _rewrite_query_async(self, query: str, chat_history: List[Tuple[str, str]]) -> str:
-        """Async rewrite — streaming path. No event-loop blocking.
-        BUG FIX: use _llm_fast (max_tokens=1024) NOT _llm_classifier (max_tokens=15).
-        """
+        """Async rewrite — streaming path."""
         if not chat_history:
             return query
-        follow_up_markers = ["it", "that", "this", "those", "these", "they", "them",
-                             "same", "above", "previous", "also", "what about", "and the",
-                             "how about", "is there", "what's"]
+
+        follow_up_markers = [
+            "it", "that", "this", "those", "these", "they", "them",
+            "same", "above", "previous", "also", "what about", "and the",
+            "how about", "is there", "what's"
+        ]
         query_lower = query.lower()
         needs_rewrite = any(marker in query_lower for marker in follow_up_markers)
+
         if not needs_rewrite and len(query.split()) > 5:
             return query
+
         try:
             history_str = ""
             for human, ai in chat_history[-3:]:
                 history_str += f"Human: {human}\nAI: {ai[:200]}\n\n"
-            prompt = CONDENSE_QUESTION_PROMPT.format(chat_history=history_str, question=query)
-            response = await self._llm_fast.ainvoke(prompt)   # _llm_fast has proper token budget
+
+            prompt = CONDENSE_QUESTION_PROMPT.format(
+                chat_history=history_str,
+                question=query
+            )
+            response = await self._llm_fast.ainvoke(prompt)
             rewritten = response.content.strip()
+
             if rewritten and len(rewritten) > 3:
                 logger.info(f"Query rewritten: '{query}' → '{rewritten}'")
                 return rewritten
@@ -360,6 +417,7 @@ class RAGService:
         """BM25 sparse keyword search (sync — runs in memory, no I/O)."""
         if not self._bm25_index or not self._bm25_docs:
             return []
+
         tokens = _tokenize(query)
         scores = self._bm25_index.get_scores(tokens)
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
@@ -369,19 +427,23 @@ class RAGService:
         """Re-rank documents using FlashRank for precision."""
         if not self._reranker or not docs:
             return docs[:top_k]
+
         try:
             from flashrank import RerankRequest
+
             passages = [
                 {"id": i, "text": doc.page_content, "meta": doc.metadata}
                 for i, doc in enumerate(docs)
             ]
             request = RerankRequest(query=query, passages=passages)
             results = self._reranker.rerank(request)
+
             reranked = []
             for r in results[:top_k]:
                 idx = r["id"]
                 if idx < len(docs):
                     reranked.append(docs[idx])
+
             logger.info(f"Re-ranked {len(docs)} -> top {len(reranked)}")
             return reranked if reranked else docs[:top_k]
         except Exception as e:
@@ -393,22 +455,25 @@ class RAGService:
         RRF_K = 60
         doc_map = {}
         rrf_scores = {}
+
         for rank, doc in enumerate(dense_results):
             key = doc.page_content[:200]
             doc_map[key] = doc
             rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (RRF_K + rank + 1)
+
         for rank, doc in enumerate(bm25_docs):
             key = doc.page_content[:200]
             if key not in doc_map:
                 doc_map[key] = doc
             rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (RRF_K + rank + 1)
+
         sorted_keys = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
         return [doc_map[key] for key in sorted_keys if key in doc_map][:fetch_k]
 
     def hybrid_search(self, query: str, k: int = None) -> List[Document]:
         """Sync hybrid retrieval (used by legacy get_answer path)."""
         k = k or settings.TOP_K_RESULTS
-        fetch_k = k * 3
+        fetch_k = max(k * 2, 8)  # slightly reduced from k*3 for better latency
         dense_results = self._vector_store.similarity_search(query, k=fetch_k)
         bm25_results = self._bm25_search(query, k=fetch_k)
         bm25_docs = [doc for doc, _ in bm25_results]
@@ -420,16 +485,18 @@ class RAGService:
     async def _hybrid_search_async(self, query: str, k: int) -> List[Document]:
         """
         Async hybrid retrieval — uses asimilarity_search so the embedding
-        API call doesn't block the event loop. BM25 is in-memory so runs sync.
+        API call doesn't block the event loop.
         """
-        fetch_k = k * 3
-        # Run async embedding search + sync BM25 concurrently
+        fetch_k = max(k * 2, 8)  # slightly reduced from k*3 for better latency
+
         dense_task = self._vector_store.asimilarity_search(query, k=fetch_k)
-        bm25_results = self._bm25_search(query, k=fetch_k)           # sync, in-memory
+        bm25_results = self._bm25_search(query, k=fetch_k)
         dense_results = await dense_task
+
         bm25_docs = [doc for doc, _ in bm25_results]
         merged = self._rrf_merge(dense_results, bm25_docs, fetch_k)
         final = self._rerank(query, merged, top_k=k)
+
         logger.info(f"Async hybrid: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(final)} final")
         return final
 
@@ -447,10 +514,12 @@ class RAGService:
             template=CONDENSE_QUESTION_PROMPT,
             input_variables=["chat_history", "question"],
         )
+
         retriever = self._vector_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": settings.TOP_K_RESULTS},
         )
+
         self._qa_chain = ConversationalRetrievalChain.from_llm(
             llm=self._llm,
             retriever=retriever,
@@ -474,25 +543,29 @@ class RAGService:
         Streaming pipeline — yields token dicts then a final summary dict.
 
         Yields:
-            {"token": "...", "done": False}   — one per LLM token
-            {"done": True, "sources": [...], "query_type": "..."}  — final
+            {"token": "...", "done": False}
+            {"done": True, "sources": [...], "query_type": "..."}
         """
         if not self._initialized:
             self.initialize()
 
         try:
-            # ── Step 1: Classify + rewrite in parallel (both are async LLM calls)
+            # Step 1: Classify + rewrite in parallel
             query_type, search_query = await asyncio.gather(
                 self._classify_query_async(query),
                 self._rewrite_query_async(query, chat_history),
             )
+
             config = RETRIEVAL_CONFIG.get(query_type, RETRIEVAL_CONFIG["SIMPLE"])
-            logger.info(f"Stream pipeline: type={query_type}, top_k={config['top_k']}, fast_llm={config['use_fast_llm']}")
+            logger.info(
+                f"Stream pipeline: type={query_type}, top_k={config['top_k']}, "
+                f"fast_llm={config['use_fast_llm']}, case_query={self._is_case_or_customer_query(query)}"
+            )
 
-            # Choose model based on query complexity
-            answer_llm = self._llm_fast if config["use_fast_llm"] else self._llm
+            # Improved model selection
+            answer_llm = self._select_answer_llm(query, config)
 
-            # ── Step 2: Greetings / out-of-scope — no retrieval, stream directly
+            # Step 2: Greetings / out-of-scope — no retrieval
             if config["skip_retrieval"]:
                 if query_type == "GREETING":
                     prompt_text = (
@@ -506,26 +579,28 @@ class RAGService:
                         f"This is outside your scope. Politely say you're designed for KYC "
                         f"document queries only. Keep it friendly and brief."
                     )
+
                 async for chunk in answer_llm.astream(prompt_text):
                     if chunk.content:
                         yield {"token": chunk.content, "done": False}
+
                 yield {"done": True, "sources": [], "query_type": query_type}
                 return
 
-            # ── Step 3: Async hybrid retrieval (embedding API is non-blocking)
+            # Step 3: Retrieval
             relevant_docs = await self._hybrid_search_async(search_query, k=config["top_k"])
 
-            # ── Step 4: Build context
+            # Step 4: Build context
             context = "\n\n---\n\n".join(doc.page_content for doc in relevant_docs)
             if not context.strip():
                 context = "[No relevant document sections were found for this query.]"
 
-            # ── Step 5: Format chat history
+            # Step 5: Format chat history
             history_str = ""
             for human, ai in chat_history[-settings.MAX_MEMORY_MESSAGES:]:
                 history_str += f"Human: {human}\nAssistant: {ai}\n\n"
 
-            # ── Step 6: Build prompt
+            # Step 6: Build prompt
             prompt = PromptTemplate(
                 template=QA_PROMPT,
                 input_variables=["context", "chat_history", "question"],
@@ -533,15 +608,15 @@ class RAGService:
             formatted = prompt.format(
                 context=context,
                 chat_history=history_str,
-                question=query,   # original query — addresses user's words directly
+                question=query,
             )
 
-            # ── Step 7: Stream tokens from LLM
+            # Step 7: Stream answer
             async for chunk in answer_llm.astream(formatted):
                 if chunk.content:
                     yield {"token": chunk.content, "done": False}
 
-            # ── Step 8: Yield final metadata
+            # Step 8: Final metadata
             sources_data = [
                 {
                     "content": doc.page_content[:300] + ("..." if len(doc.page_content) > 300 else ""),
@@ -553,17 +628,20 @@ class RAGService:
 
         except Exception as e:
             logger.error(f"Streaming error: {e}")
-            yield {"token": "I encountered an error while processing your question. Please try again.", "done": False}
+            yield {
+                "token": "I encountered an error while processing your question. Please try again.",
+                "done": False,
+            }
             yield {"done": True, "sources": [], "query_type": "SIMPLE"}
 
     # ==========================================
-    # Non-Streaming Answer Pipeline (kept for /chat fallback)
+    # Non-Streaming Answer Pipeline
     # ==========================================
 
     async def get_answer(self, query: str, chat_history: List[Tuple[str, str]]) -> dict:
         """
         Non-streaming pipeline — gathers full answer then returns.
-        Used by /chat endpoint (backward-compatible).
+        Used by /chat endpoint.
         """
         if not self._initialized:
             self.initialize()
@@ -571,9 +649,14 @@ class RAGService:
         try:
             query_type = self._classify_query(query)
             config = RETRIEVAL_CONFIG.get(query_type, RETRIEVAL_CONFIG["SIMPLE"])
-            answer_llm = self._llm_fast if config["use_fast_llm"] else self._llm
 
-            logger.info(f"Pipeline: type={query_type}, top_k={config['top_k']}, fast_llm={config['use_fast_llm']}")
+            logger.info(
+                f"Pipeline: type={query_type}, top_k={config['top_k']}, "
+                f"fast_llm={config['use_fast_llm']}, case_query={self._is_case_or_customer_query(query)}"
+            )
+
+            # Improved model selection
+            answer_llm = self._select_answer_llm(query, config)
 
             if config["skip_retrieval"]:
                 if query_type == "GREETING":
@@ -588,12 +671,17 @@ class RAGService:
                         f"This is outside your scope. Politely say you're designed for KYC "
                         f"document queries only. Keep it friendly and brief."
                     )
+
                 response = await answer_llm.ainvoke(prompt_text)
-                return {"answer": response.content, "source_documents": [], "query_type": query_type}
+                return {
+                    "answer": response.content,
+                    "source_documents": [],
+                    "query_type": query_type,
+                }
 
             search_query = self._rewrite_query(query, chat_history)
-            # BUG FIX: use async hybrid search — sync version blocks the event loop
             relevant_docs = await self._hybrid_search_async(search_query, k=config["top_k"])
+
             context = "\n\n---\n\n".join(doc.page_content for doc in relevant_docs)
             if not context.strip():
                 context = "[No relevant document sections were found for this query.]"
@@ -606,11 +694,20 @@ class RAGService:
                 template=QA_PROMPT,
                 input_variables=["context", "chat_history", "question"],
             )
-            formatted = prompt.format(context=context, chat_history=history_str, question=query)
+            formatted = prompt.format(
+                context=context,
+                chat_history=history_str,
+                question=query,
+            )
+
             response = await answer_llm.ainvoke(formatted)
 
             logger.info(f"Answer generated: {len(response.content)} chars, {len(relevant_docs)} sources")
-            return {"answer": response.content, "source_documents": relevant_docs, "query_type": query_type}
+            return {
+                "answer": response.content,
+                "source_documents": relevant_docs,
+                "query_type": query_type,
+            }
 
         except Exception as e:
             logger.error(f"Error getting answer: {e}")
