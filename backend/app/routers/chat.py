@@ -5,7 +5,6 @@ Chat API Router - Production-level endpoints.
 import json
 import logging
 import uuid
-from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
@@ -70,7 +69,6 @@ async def chat(request: ChatRequest):
             answer=answer,
             sources=sources,
             session_id=request.session_id,
-            timestamp=datetime.utcnow(),
         )
 
     except Exception as e:
@@ -189,7 +187,8 @@ async def upload_documents(files: List[UploadFile] = File(...)):
             results.append({
                 "filename": result["filename"],
                 "status": "success",
-                "message": f"Processed successfully",
+                "message": "Processed successfully",
+                "chunks_created": result.get("chunks_created", 0),
             })
         except ValueError as e:
             errors.append({"filename": file.filename, "status": "error", "message": str(e)})

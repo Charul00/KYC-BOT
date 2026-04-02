@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react'
 import axios from 'axios'
 
-const MAX_FILES = 10          // max files per session
-const MAX_SIZE_MB = 10        // max MB per file
+const MAX_FILES = 10
+const MAX_SIZE_MB = 10
 const ALLOWED_EXT = ['.txt', '.pdf', '.docx', '.md', '.xlsx']
 
 const FILE_ICONS = {
@@ -25,32 +25,67 @@ function FileTypeBadge({ ext }) {
   )
 }
 
+function estimateProcessingTime(file) {
+  const ext = '.' + file.name.split('.').pop().toLowerCase()
+  const sizeMB = file.size / (1024 * 1024)
+
+  if (ext === '.pdf') {
+    if (sizeMB <= 0.3) return '10–20 sec'
+    if (sizeMB <= 0.7) return '20–35 sec'
+    return '35–60 sec'
+  }
+
+  if (ext === '.docx') {
+    if (sizeMB <= 0.3) return '8–15 sec'
+    if (sizeMB <= 0.7) return '15–25 sec'
+    return '25–45 sec'
+  }
+
+  if (ext === '.xlsx') {
+    if (sizeMB <= 0.3) return '12–25 sec'
+    if (sizeMB <= 0.7) return '25–40 sec'
+    return '40–60 sec'
+  }
+
+  if (ext === '.txt' || ext === '.md') {
+    if (sizeMB <= 0.3) return '5–10 sec'
+    if (sizeMB <= 0.7) return '10–20 sec'
+    return '20–30 sec'
+  }
+
+  return '10–30 sec'
+}
+
 export default function DocumentUpload({ onClose, apiBase }) {
-  const [files, setFiles]       = useState([])
+  const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
-  const [progress, setProgress]   = useState([])   // per-file status
-  const [error, setError]         = useState(null)
-  const [dragOver, setDragOver]   = useState(false)
-  const [done, setDone]           = useState(false)
+  const [progress, setProgress] = useState([])
+  const [error, setError] = useState(null)
+  const [dragOver, setDragOver] = useState(false)
+  const [done, setDone] = useState(false)
   const fileInputRef = useRef(null)
 
-  // ── Validation
   const validateAndAdd = (newFiles) => {
     setError(null)
     const valid = []
+
     for (const f of newFiles) {
       const ext = '.' + f.name.split('.').pop().toLowerCase()
+
       if (!ALLOWED_EXT.includes(ext)) {
         setError(`"${f.name}" — unsupported type. Allowed: ${ALLOWED_EXT.join(', ')}`)
         continue
       }
+
       if (f.size > MAX_SIZE_MB * 1024 * 1024) {
-        setError(`"${f.name}" exceeds ${MAX_SIZE_MB}MB limit.`)
+        setError(`"${f.name}" exceeds ${MAX_SIZE_MB}MB limit. Please upload a smaller file.`)
         continue
       }
-      if (files.find(x => x.name === f.name)) continue   // skip duplicates
+
+      if (files.find(x => x.name === f.name)) continue
       valid.push(f)
     }
+
     setFiles(prev => {
       const next = [...prev, ...valid]
       if (next.length > MAX_FILES) {
@@ -62,29 +97,43 @@ export default function DocumentUpload({ onClose, apiBase }) {
   }
 
   const handleDrop = (e) => {
-    e.preventDefault(); setDragOver(false)
+    e.preventDefault()
+    setDragOver(false)
     validateAndAdd(Array.from(e.dataTransfer.files))
   }
+
   const handleFileSelect = (e) => {
     validateAndAdd(Array.from(e.target.files))
     e.target.value = ''
   }
-  const removeFile = (name) => setFiles(prev => prev.filter(f => f.name !== name))
 
-  // ── Upload ONE file at a time → avoids Render's 30-second timeout
+  const removeFile = (name) => {
+    setFiles(prev => prev.filter(f => f.name !== name))
+  }
+
   const handleUpload = async () => {
     if (!files.length) return
+
     setUploading(true)
     setError(null)
     setDone(false)
 
-    // Initialise per-file progress entries
-    const initial = files.map(f => ({ name: f.name, status: 'pending', message: '' }))
+    const initial = files.map(f => ({
+      name: f.name,
+      status: 'pending',
+      message: '',
+      estimate: estimateProcessingTime(f),
+    }))
     setProgress(initial)
 
     for (let i = 0; i < files.length; i++) {
-      // Mark as uploading
-      setProgress(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'uploading' } : p))
+      setProgress(prev =>
+        prev.map((p, idx) =>
+          idx === i
+            ? { ...p, status: 'uploading', message: `Estimated time: ${p.estimate}` }
+            : p
+        )
+      )
 
       const formData = new FormData()
       formData.append('files', files[i])
@@ -92,26 +141,52 @@ export default function DocumentUpload({ onClose, apiBase }) {
       try {
         const res = await axios.post(`${apiBase}/documents/upload`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 60000,    // 60s per individual file
+          timeout: 60000,
         })
+
         const processed = res.data.processed?.[0]
-        const failed    = res.data.errors?.[0]
+        const failed = res.data.errors?.[0]
+
         if (processed) {
-          setProgress(prev => prev.map((p, idx) =>
-            idx === i ? { ...p, status: 'success', message: `${processed.chunks_created || ''} chunks indexed` } : p
-          ))
+          setProgress(prev =>
+            prev.map((p, idx) =>
+              idx === i
+                ? {
+                    ...p,
+                    status: 'success',
+                    message: `${processed.chunks_created || 0} chunks indexed`,
+                  }
+                : p
+            )
+          )
         } else if (failed) {
-          setProgress(prev => prev.map((p, idx) =>
-            idx === i ? { ...p, status: 'error', message: failed.message } : p
-          ))
+          setProgress(prev =>
+            prev.map((p, idx) =>
+              idx === i
+                ? { ...p, status: 'error', message: failed.message }
+                : p
+            )
+          )
         }
       } catch (err) {
-        // axios timeout = ECONNABORTED; fetch AbortSignal timeout = TimeoutError / AbortError
-        const isTimeout = err.code === 'ECONNABORTED' || err.name === 'TimeoutError' || err.name === 'AbortError'
-        const msg = err.response?.data?.detail || (isTimeout ? 'Timed out — try a smaller file' : 'Upload failed')
-        setProgress(prev => prev.map((p, idx) =>
-          idx === i ? { ...p, status: 'error', message: msg } : p
-        ))
+        const isTimeout =
+          err.code === 'ECONNABORTED' ||
+          err.name === 'TimeoutError' ||
+          err.name === 'AbortError'
+
+        const msg =
+          err.response?.data?.detail ||
+          (isTimeout
+            ? 'Timed out — try a smaller file or upload only one file'
+            : 'Upload failed')
+
+        setProgress(prev =>
+          prev.map((p, idx) =>
+            idx === i
+              ? { ...p, status: 'error', message: msg }
+              : p
+          )
+        )
       }
     }
 
@@ -121,29 +196,32 @@ export default function DocumentUpload({ onClose, apiBase }) {
   }
 
   const statusIcon = (status) => {
-    if (status === 'uploading') return (
-      <svg className="w-3.5 h-3.5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-      </svg>
-    )
+    if (status === 'uploading') {
+      return (
+        <svg className="w-3.5 h-3.5 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+      )
+    }
     if (status === 'success') return <span className="text-green-500 text-sm">✓</span>
-    if (status === 'error')   return <span className="text-red-500 text-sm">✗</span>
+    if (status === 'error') return <span className="text-red-500 text-sm">✗</span>
     return <span className="w-3.5 h-3.5 rounded-full border border-slate-300 inline-block" />
   }
 
   const successCount = progress.filter(p => p.status === 'success').length
-  const errorCount   = progress.filter(p => p.status === 'error').length
+  const errorCount = progress.filter(p => p.status === 'error').length
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
 
-        {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
             <h2 className="text-base font-semibold" style={{ color: '#1a2744' }}>Upload Documents</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Max {MAX_FILES} files · {MAX_SIZE_MB}MB each · PDF, DOCX, XLSX, TXT, MD</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Max {MAX_FILES} files · {MAX_SIZE_MB}MB each · Upload one file at a time (recommended) · PDF, DOCX, XLSX, TXT, MD
+            </p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg">
             <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -152,7 +230,6 @@ export default function DocumentUpload({ onClose, apiBase }) {
           </button>
         </div>
 
-        {/* Drop Zone */}
         {!uploading && !done && (
           <div
             onDrop={handleDrop}
@@ -174,49 +251,59 @@ export default function DocumentUpload({ onClose, apiBase }) {
             <svg className="w-8 h-8 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
             </svg>
-            <p className="text-sm text-slate-500">Drop files here or <span className="text-blue-500">browse</span></p>
+            <p className="text-sm text-slate-500">
+              Drop files here or <span className="text-blue-500">browse</span>
+            </p>
             <div className="flex flex-wrap justify-center gap-1.5 mt-2">
               {ALLOWED_EXT.map(ext => <FileTypeBadge key={ext} ext={ext} />)}
             </div>
           </div>
         )}
 
-        {/* Selected files list */}
         {files.length > 0 && !uploading && !done && (
-          <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto">
+          <div className="mt-3 space-y-1.5 max-h-44 overflow-y-auto">
             {files.map(f => {
               const ext = '.' + f.name.split('.').pop().toLowerCase()
               return (
-                <div key={f.name} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileTypeBadge ext={ext} />
-                    <span className="text-xs text-slate-600 truncate">{f.name}</span>
-                    <span className="text-xs text-slate-400 flex-shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
+                <div key={f.name} className="p-2 bg-slate-50 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileTypeBadge ext={ext} />
+                      <span className="text-xs text-slate-600 truncate">{f.name}</span>
+                      <span className="text-xs text-slate-400 flex-shrink-0">
+                        {(f.size / 1024).toFixed(0)} KB
+                      </span>
+                    </div>
+                    <button onClick={() => removeFile(f.name)} className="p-1 hover:bg-slate-200 rounded flex-shrink-0 ml-1">
+                      <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
                   </div>
-                  <button onClick={() => removeFile(f.name)} className="p-1 hover:bg-slate-200 rounded flex-shrink-0 ml-1">
-                    <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                    </svg>
-                  </button>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Estimated processing time: {estimateProcessingTime(f)}
+                  </p>
                 </div>
               )
             })}
           </div>
         )}
 
-        {/* Per-file progress (shown during and after upload) */}
         {progress.length > 0 && (
           <div className="mt-3 space-y-1.5 max-h-52 overflow-y-auto">
             <p className="text-xs font-medium text-slate-500 mb-1">
               {uploading ? 'Processing files one by one…' : `Done — ${successCount} succeeded${errorCount ? `, ${errorCount} failed` : ''}`}
             </p>
             {progress.map((p, i) => (
-              <div key={i} className={`flex items-center gap-2 p-2 rounded-lg text-xs border ${
-                p.status === 'success' ? 'bg-green-50 border-green-100' :
-                p.status === 'error'   ? 'bg-red-50 border-red-100' :
-                p.status === 'uploading' ? 'bg-blue-50 border-blue-100' :
-                'bg-slate-50 border-slate-100'
-              }`}>
+              <div
+                key={i}
+                className={`flex items-center gap-2 p-2 rounded-lg text-xs border ${
+                  p.status === 'success' ? 'bg-green-50 border-green-100' :
+                  p.status === 'error' ? 'bg-red-50 border-red-100' :
+                  p.status === 'uploading' ? 'bg-blue-50 border-blue-100' :
+                  'bg-slate-50 border-slate-100'
+                }`}
+              >
                 <span className="flex-shrink-0">{statusIcon(p.status)}</span>
                 <span className="truncate text-slate-700 flex-1">{p.name}</span>
                 {p.message && <span className="text-slate-400 flex-shrink-0">{p.message}</span>}
@@ -226,14 +313,12 @@ export default function DocumentUpload({ onClose, apiBase }) {
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <div className="mt-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg">
             <p className="text-xs text-amber-700">{error}</p>
           </div>
         )}
 
-        {/* Action buttons */}
         {!done ? (
           <button
             onClick={handleUpload}
@@ -264,13 +349,16 @@ export default function DocumentUpload({ onClose, apiBase }) {
           </div>
         )}
 
-        {/* Supported formats info */}
         {!uploading && !done && (
           <div className="mt-3 pt-3 border-t border-slate-100">
             <p className="text-xs text-slate-400 text-center">
-              ✓ PDF &nbsp;·&nbsp; ✓ Word (DOCX) &nbsp;·&nbsp; ✓ Excel (XLSX) &nbsp;·&nbsp; ✓ TXT &nbsp;·&nbsp; ✓ Markdown
+              ✓ PDF · ✓ Word (DOCX) · ✓ Excel (XLSX) · ✓ TXT · ✓ Markdown
               &nbsp;&nbsp;|&nbsp;&nbsp;
-              ✗ Images &nbsp;·&nbsp; ✗ MP3 &nbsp;·&nbsp; ✗ ZIP
+              ⚠ Recommended: max 1MB per file · Upload files one by one for best performance
+              &nbsp;&nbsp;|&nbsp;&nbsp;
+              ⏱ Large or text-heavy files may take longer to process
+              &nbsp;&nbsp;|&nbsp;&nbsp;
+              ✗ Images · ✗ MP3 · ✗ ZIP
             </p>
           </div>
         )}
