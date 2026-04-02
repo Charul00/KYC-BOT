@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # Upload Configuration
     MAX_UPLOAD_SIZE_MB: int = 10
-    ALLOWED_EXTENSIONS: list = [".txt", ".pdf", ".docx", ".md"]
+    ALLOWED_EXTENSIONS: list = [".txt", ".pdf", ".docx", ".md", ".xlsx"]
 
     # CORS — add your Vercel URL after deploying
     CORS_ORIGINS: list = [

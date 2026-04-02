@@ -120,16 +120,25 @@ class DocumentService:
                     with z.open("word/document.xml") as f:
                         tree = ET.parse(f)
                         root = tree.getroot()
-                        # Extract text from all w:t elements
-                        ns = {
-                            "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                        }
                         for t_elem in root.iter(
                             "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
                         ):
                             if t_elem.text:
                                 text_parts.append(t_elem.text)
                 return " ".join(text_parts)
+
+            elif file_ext == ".xlsx":
+                import openpyxl
+                wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+                text_parts = []
+                for sheet in wb.worksheets:
+                    text_parts.append(f"[Sheet: {sheet.title}]")
+                    for row in sheet.iter_rows(values_only=True):
+                        row_text = "  |  ".join(str(c) for c in row if c is not None)
+                        if row_text.strip():
+                            text_parts.append(row_text)
+                wb.close()
+                return "\n".join(text_parts)
 
             else:
                 raise ValueError(f"Unsupported file type: {file_ext}")

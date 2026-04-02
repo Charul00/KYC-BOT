@@ -13,7 +13,7 @@ services:
       - key: DOCUMENTS_DIR
         value: ./data/documents
       - key: MODEL_NAME
-        value: gpt-4o
+        value: gpt-4o-mini
       - key: EMBEDDING_MODEL
         value: text-embedding-3-small
       - key: CHUNK_SIZE
@@ -27,7 +27,7 @@ services:
       - key: MAX_MEMORY_MESSAGES
         value: "5"
       - key: MAX_TOKENS
-        value: "2048"
+        value: "1024"
       - key: FLASHRANK_CACHE_DIR
         value: /tmp/flashrank
       - key: PYTHON_VERSION

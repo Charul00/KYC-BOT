@@ -5,7 +5,11 @@ Uses LangChain's ConversationBufferWindowMemory for sliding window memory.
 
 import logging
 from typing import Dict, List, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 from app.config import settings
 
@@ -19,13 +23,13 @@ class SessionMemory:
         self.session_id = session_id
         self.max_messages = max_messages
         self.history: List[Tuple[str, str]] = []  # List of (human, ai) tuples
-        self.created_at = datetime.utcnow()
-        self.last_active = datetime.utcnow()
+        self.created_at = _utcnow()
+        self.last_active = _utcnow()
 
     def add_exchange(self, human_message: str, ai_message: str):
         """Add a human-AI exchange to memory."""
         self.history.append((human_message, ai_message))
-        self.last_active = datetime.utcnow()
+        self.last_active = _utcnow()
 
         # Keep only last N exchanges (sliding window)
         if len(self.history) > self.max_messages:
@@ -120,7 +124,7 @@ class MemoryService:
 
     def cleanup_inactive_sessions(self, max_inactive_minutes: int = 60):
         """Remove sessions that have been inactive for too long."""
-        now = datetime.utcnow()
+        now = _utcnow()
         to_remove = []
         for session_id, session in self._sessions.items():
             inactive_time = (now - session.last_active).total_seconds() / 60

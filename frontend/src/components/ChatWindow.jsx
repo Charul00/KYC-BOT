@@ -8,7 +8,7 @@ const SUGGESTED = [
   "What are eClerx's key products and platforms?",
 ]
 
-export default function ChatWindow({ messages, isLoading, onSendMessage, isStreaming }) {
+export default function ChatWindow({ messages, isLoading, onSendMessage }) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
@@ -54,7 +54,7 @@ export default function ChatWindow({ messages, isLoading, onSendMessage, isStrea
   }
 
   const charCount = input.length
-  const charLimit = 1500
+  const charLimit = 2000   // matches backend ChatRequest max_length=2000
   const nearLimit = charCount > charLimit * 0.85
 
   return (

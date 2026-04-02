@@ -74,6 +74,7 @@ class RAGService:
         self._vector_store: Optional[Chroma] = None
         self._llm: Optional[ChatOpenAI] = None
         self._llm_fast: Optional[ChatOpenAI] = None
+        self._llm_classifier: Optional[ChatOpenAI] = None   # BUG FIX: declare in __init__
         self._text_splitter: Optional[RecursiveCharacterTextSplitter] = None
         self._qa_chain: Optional[ConversationalRetrievalChain] = None
         self._reranker = None
@@ -295,7 +296,10 @@ class RAGService:
             return "SIMPLE"
 
     def _rewrite_query(self, query: str, chat_history: List[Tuple[str, str]]) -> str:
-        """Sync rewrite — legacy path."""
+        """Sync rewrite — legacy path.
+        BUG FIX: use _llm_fast (max_tokens=1024) NOT _llm_classifier (max_tokens=15).
+        A rewritten query can be 20-50 tokens; 15 would silently truncate it.
+        """
         if not chat_history:
             return query
         follow_up_markers = ["it", "that", "this", "those", "these", "they", "them",
@@ -310,7 +314,7 @@ class RAGService:
             for human, ai in chat_history[-3:]:
                 history_str += f"Human: {human}\nAI: {ai[:200]}\n\n"
             prompt = CONDENSE_QUESTION_PROMPT.format(chat_history=history_str, question=query)
-            response = self._llm_classifier.invoke(prompt)
+            response = self._llm_fast.invoke(prompt)   # _llm_fast has proper token budget
             rewritten = response.content.strip()
             if rewritten and len(rewritten) > 3:
                 logger.info(f"Query rewritten: '{query}' → '{rewritten}'")
@@ -321,7 +325,9 @@ class RAGService:
             return query
 
     async def _rewrite_query_async(self, query: str, chat_history: List[Tuple[str, str]]) -> str:
-        """Async rewrite — streaming path. No event-loop blocking."""
+        """Async rewrite — streaming path. No event-loop blocking.
+        BUG FIX: use _llm_fast (max_tokens=1024) NOT _llm_classifier (max_tokens=15).
+        """
         if not chat_history:
             return query
         follow_up_markers = ["it", "that", "this", "those", "these", "they", "them",
@@ -336,7 +342,7 @@ class RAGService:
             for human, ai in chat_history[-3:]:
                 history_str += f"Human: {human}\nAI: {ai[:200]}\n\n"
             prompt = CONDENSE_QUESTION_PROMPT.format(chat_history=history_str, question=query)
-            response = await self._llm_classifier.ainvoke(prompt)
+            response = await self._llm_fast.ainvoke(prompt)   # _llm_fast has proper token budget
             rewritten = response.content.strip()
             if rewritten and len(rewritten) > 3:
                 logger.info(f"Query rewritten: '{query}' → '{rewritten}'")
@@ -586,7 +592,8 @@ class RAGService:
                 return {"answer": response.content, "source_documents": [], "query_type": query_type}
 
             search_query = self._rewrite_query(query, chat_history)
-            relevant_docs = self.hybrid_search(search_query, k=config["top_k"])
+            # BUG FIX: use async hybrid search — sync version blocks the event loop
+            relevant_docs = await self._hybrid_search_async(search_query, k=config["top_k"])
             context = "\n\n---\n\n".join(doc.page_content for doc in relevant_docs)
             if not context.strip():
                 context = "[No relevant document sections were found for this query.]"

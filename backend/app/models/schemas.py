@@ -4,7 +4,12 @@ Pydantic models for request/response schemas.
 
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utcnow() -> datetime:
+    """timezone-aware UTC now — replaces deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc)
 
 
 # ========================
@@ -29,7 +34,7 @@ class ChatResponse(BaseModel):
     answer: str = Field(..., description="AI-generated answer")
     sources: List[SourceDocument] = Field(default_factory=list, description="Source documents used")
     session_id: str = Field(..., description="Session ID")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utcnow)
 
 
 # ========================
