@@ -1,64 +1,95 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import ChatWindow from './components/ChatWindow'
 import DocumentUpload from './components/DocumentUpload'
+import ProcessingBadge from './components/ProcessingBadge'
 import axios from 'axios'
 
-// Uses env var in production (Vercel), falls back to localhost for dev
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1'
+const SESSIONS_KEY = 'kyc_sessions_v1'
+const MAX_STORED_SESSIONS = 30
+
+// ── Persist sessions in localStorage ────────────────────────────────────────
+function loadSessions() {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveSessions(sessions) {
+  try {
+    // Keep only the most recent MAX_STORED_SESSIONS
+    const trimmed = sessions.slice(-MAX_STORED_SESSIONS)
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(trimmed))
+  } catch {}
+}
 
 export default function App() {
-  const [messages, setMessages] = useState([])
-  const [sessionId, setSessionId] = useState(null)
-  const [sessions, setSessions] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [showUpload, setShowUpload] = useState(false)
+  const [messages, setMessages]       = useState([])
+  const [sessionId, setSessionId]     = useState(null)
+  const [sessions, setSessions]       = useState(loadSessions)   // init from localStorage
+  const [isLoading, setIsLoading]     = useState(false)
+  const [showUpload, setShowUpload]   = useState(false)
+  const [bgJobs, setBgJobs]           = useState([])   // jobs shared with floating badge
+  const handleJobsChange = useCallback((jobs) => setBgJobs(jobs), [])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const initDone = useRef(false)
 
+  // Save sessions to localStorage whenever they change
+  useEffect(() => {
+    saveSessions(sessions)
+  }, [sessions])
+
+  // Create first session on mount
   useEffect(() => {
     if (!initDone.current) {
       initDone.current = true
       createNewSession()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ─── FIX: Generate session ID locally FIRST, then sync with backend
-  // This prevents the race condition where a slow Render cold-start response
-  // would call setMessages([]) after the user already typed something.
+  // ── Session management ─────────────────────────────────────────────────────
+
   const createNewSession = async () => {
-    // 1. Generate local ID immediately — don't wait for backend
+    // Generate local ID immediately — don't block on backend
     const localId = 'sess_' + Math.random().toString(36).substring(2, 10)
     setSessionId(localId)
     setMessages([])
-    const newSession = { id: localId, title: 'New Conversation' }
+
+    const newSession = { id: localId, title: 'New Conversation', createdAt: Date.now() }
     setSessions(prev => [...prev, newSession])
 
-    // 2. Try to register session with backend in background
+    // Register with backend in background
     try {
       const res = await axios.post(`${API_BASE}/sessions/new`, {}, { timeout: 15000 })
       const backendId = res.data.session_id
       if (backendId) {
-        // Swap the local ID for the backend-assigned ID — but only if user hasn't typed yet
         setSessionId(prev => (prev === localId ? backendId : prev))
         setSessions(prev =>
           prev.map(s => (s.id === localId ? { ...s, id: backendId } : s))
         )
       }
     } catch {
-      // Backend is waking up (cold start) — that's fine, the local ID still works for chat
+      // Backend cold start — local ID still works for chat
     }
   }
 
   const switchSession = async (id) => {
+    if (id === sessionId) return
     setSessionId(id)
+    setMessages([])
+
     try {
       const res = await axios.get(`${API_BASE}/sessions/${id}/history`, { timeout: 10000 })
       const history = res.data.history || []
       const formatted = []
       history.forEach(ex => {
-        formatted.push({ role: 'user', content: ex.human, timestamp: new Date().toISOString() })
-        formatted.push({ role: 'assistant', content: ex.ai, sources: [], timestamp: new Date().toISOString() })
+        formatted.push({ role: 'user',      content: ex.human, timestamp: new Date().toISOString() })
+        formatted.push({ role: 'assistant', content: ex.ai,    sources: [], timestamp: new Date().toISOString() })
       })
       setMessages(formatted)
     } catch {
@@ -66,26 +97,40 @@ export default function App() {
     }
   }
 
+  const deleteSession = async (id) => {
+    try { await axios.delete(`${API_BASE}/sessions/${id}`) } catch {}
+    setSessions(prev => prev.filter(s => s.id !== id))
+    if (id === sessionId) createNewSession()
+  }
+
+  const clearChat = async () => {
+    try { await axios.delete(`${API_BASE}/sessions/${sessionId}`) } catch {}
+    setMessages([])
+    // Update session title back to default
+    setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title: 'New Conversation' } : s))
+  }
+
+  // ── Message sending (streaming SSE) ───────────────────────────────────────
+
   const sendMessage = async (query) => {
     if (!query.trim() || isLoading) return
 
-    const userMsg = { role: 'user', content: query, timestamp: new Date().toISOString() }
-    // Unique ID so we can update the streaming message in-place
-    const aiMsgId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    const userMsg  = { role: 'user', content: query, timestamp: new Date().toISOString() }
+    const aiMsgId  = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 
     setMessages(prev => [...prev, userMsg])
     setIsLoading(true)
 
-    // Update session title from first message
+    // Update session title from the first real message
     setSessions(prev =>
       prev.map(s =>
         s.id === sessionId && s.title === 'New Conversation'
-          ? { ...s, title: query.length > 40 ? query.substring(0, 40) + '…' : query }
+          ? { ...s, title: query.length > 42 ? query.substring(0, 42) + '…' : query }
           : s
       )
     )
 
-    // Add an empty placeholder AI message that we'll stream into
+    // Add empty streaming placeholder
     setMessages(prev => [
       ...prev,
       { id: aiMsgId, role: 'assistant', content: '', sources: [], streaming: true, timestamp: new Date().toISOString() },
@@ -96,7 +141,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, session_id: sessionId }),
-        signal: AbortSignal.timeout(90000),   // 90s hard timeout
+        signal: AbortSignal.timeout(90000),
       })
 
       if (!response.ok) {
@@ -105,18 +150,12 @@ export default function App() {
         if (status === 401) errorMsg = 'Authentication error. Please contact the administrator.'
         else if (status === 429) errorMsg = 'Service is busy right now. Please wait a moment and try again.'
         else if (status === 503) errorMsg = 'The AI model is temporarily unavailable. Please try again shortly.'
-        setMessages(prev =>
-          prev.map(m =>
-            m.id === aiMsgId
-              ? { ...m, content: errorMsg, isError: true, streaming: false }
-              : m
-          )
-        )
+        setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, content: errorMsg, isError: true, streaming: false } : m))
         setIsLoading(false)
         return
       }
 
-      const reader = response.body.getReader()
+      const reader  = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
       let accumulated = ''
@@ -126,19 +165,15 @@ export default function App() {
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
-
-        // SSE lines are separated by \n\n
         const parts = buffer.split('\n\n')
-        buffer = parts.pop()  // keep incomplete chunk
+        buffer = parts.pop()
 
         for (const part of parts) {
           const line = part.trim()
           if (!line.startsWith('data: ')) continue
           try {
             const data = JSON.parse(line.slice(6))
-
             if (data.done) {
-              // Stream complete — attach sources and mark done
               setMessages(prev =>
                 prev.map(m =>
                   m.id === aiMsgId
@@ -150,9 +185,7 @@ export default function App() {
             } else if (data.token) {
               accumulated += data.token
               setMessages(prev =>
-                prev.map(m =>
-                  m.id === aiMsgId ? { ...m, content: accumulated } : m
-                )
+                prev.map(m => m.id === aiMsgId ? { ...m, content: accumulated } : m)
               )
             }
           } catch {
@@ -164,31 +197,19 @@ export default function App() {
       let errorMsg = 'Something went wrong. Please try again.'
       if (err.name === 'TimeoutError') errorMsg = 'Request timed out. The server may be waking up — please try again.'
       else if (err.name === 'AbortError') errorMsg = 'Request was cancelled.'
-
       setMessages(prev =>
-        prev.map(m =>
-          m.id === aiMsgId
-            ? { ...m, content: errorMsg, isError: true, streaming: false }
-            : m
-        )
+        prev.map(m => m.id === aiMsgId ? { ...m, content: errorMsg, isError: true, streaming: false } : m)
       )
       setIsLoading(false)
     }
   }
 
-  const clearChat = async () => {
-    try { await axios.delete(`${API_BASE}/sessions/${sessionId}`) } catch {}
-    setMessages([])
-  }
-
-  const deleteSession = async (id) => {
-    try { await axios.delete(`${API_BASE}/sessions/${id}`) } catch {}
-    setSessions(prev => prev.filter(s => s.id !== id))
-    if (id === sessionId) createNewSession()
-  }
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden">
+
+      {/* Sidebar — always in DOM, slides in/out via width transition */}
       <Sidebar
         isOpen={sidebarOpen}
         sessions={sessions}
@@ -196,24 +217,28 @@ export default function App() {
         onNewChat={createNewSession}
         onSelectSession={switchSession}
         onDeleteSession={deleteSession}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        onToggle={() => setSidebarOpen(o => !o)}
         onShowUpload={() => setShowUpload(true)}
       />
 
+      {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top header bar */}
+
+        {/* Top header */}
         <header className="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between flex-shrink-0 shadow-sm">
           <div className="flex items-center gap-3">
-            {!sidebarOpen && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-            )}
+            {/* Hamburger — only shown when sidebar is closed */}
+            <button
+              onClick={() => setSidebarOpen(o => !o)}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+              style={{ opacity: sidebarOpen ? 0.4 : 1 }}
+            >
+              <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
             <div className="flex items-center gap-3">
               <img src="/eclerx-logo.svg" alt="eClerx" className="h-7" />
               <div className="w-px h-5 bg-slate-200" />
@@ -223,6 +248,7 @@ export default function App() {
               </div>
             </div>
           </div>
+
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 mr-2">
               <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -244,10 +270,19 @@ export default function App() {
         />
       </div>
 
-      {showUpload && (
-        <DocumentUpload
-          onClose={() => setShowUpload(false)}
-          apiBase={API_BASE}
+      {/* Upload modal — always mounted so background polling survives close */}
+      <DocumentUpload
+        visible={showUpload}
+        onClose={() => setShowUpload(false)}
+        apiBase={API_BASE}
+        onJobsChange={handleJobsChange}
+      />
+
+      {/* Floating processing badge — appears when modal is closed but jobs are running */}
+      {!showUpload && (
+        <ProcessingBadge
+          jobs={bgJobs}
+          onReopen={() => setShowUpload(true)}
         />
       )}
     </div>

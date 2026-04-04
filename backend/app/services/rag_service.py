@@ -44,14 +44,17 @@ def _tokenize(text: str) -> List[str]:
 
 
 # Retrieval config per query type
+# top_k = final chunks passed to the LLM after reranking
 RETRIEVAL_CONFIG = {
-    "GREETING":      {"top_k": 0, "skip_retrieval": True,  "use_fast_llm": True},
-    "OUT_OF_SCOPE":  {"top_k": 0, "skip_retrieval": True,  "use_fast_llm": True},
-    "LOOKUP":        {"top_k": 2, "skip_retrieval": False, "use_fast_llm": True},
-    "SIMPLE":        {"top_k": 3, "skip_retrieval": False, "use_fast_llm": True},
-    "COMPLEX":       {"top_k": 4, "skip_retrieval": False, "use_fast_llm": False},
-    "TRICKY":        {"top_k": 4, "skip_retrieval": False, "use_fast_llm": False},
-    "ADVERSARIAL":   {"top_k": 4, "skip_retrieval": False, "use_fast_llm": False},
+    "GREETING":          {"top_k": 0,  "skip_retrieval": True,  "use_fast_llm": True},
+    "OUT_OF_SCOPE":      {"top_k": 0,  "skip_retrieval": True,  "use_fast_llm": True},
+    "LOOKUP":            {"top_k": 6,  "skip_retrieval": False, "use_fast_llm": True},
+    "SIMPLE":            {"top_k": 8,  "skip_retrieval": False, "use_fast_llm": True},
+    "COMPLEX":           {"top_k": 12, "skip_retrieval": False, "use_fast_llm": False},
+    "TRICKY":            {"top_k": 12, "skip_retrieval": False, "use_fast_llm": False},
+    "ADVERSARIAL":       {"top_k": 8,  "skip_retrieval": False, "use_fast_llm": False},
+    # Document-level questions: summarize, parties, clauses, payment terms, governing law, etc.
+    "DOCUMENT_ANALYSIS": {"top_k": 16, "skip_retrieval": False, "use_fast_llm": False},
 }
 
 GREETING_PATTERNS = re.compile(
@@ -97,11 +100,22 @@ class RAGService:
             openai_api_key=settings.OPENAI_API_KEY,
         )
 
+        # Primary splitter — respects paragraph / table / page boundaries
+        # Larger chunk size (1500) keeps tables and clauses intact
         self._text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP,
             length_function=len,
-            separators=["\n\n", "\n", ". ", ", ", " ", ""],
+            separators=[
+                "\n\n\n",           # triple newline (section breaks)
+                "\n\n",             # paragraph breaks
+                "\n|",              # Markdown table row boundaries
+                "\n",               # single newlines
+                ". ",               # sentence boundaries
+                ", ",
+                " ",
+                "",
+            ],
             is_separator_regex=False,
         )
 
@@ -243,10 +257,25 @@ class RAGService:
     # ==========================================
 
     def chunk_documents(self, documents: List[Document]) -> List[Document]:
-        """Split documents into chunks using Recursive Character Text Splitting."""
+        """
+        Split documents into chunks using Recursive Character Text Splitting.
+        Preserves page_number, has_tables, document_title metadata across child chunks
+        so every chunk can be cited accurately.
+        """
         chunks = self._text_splitter.split_documents(documents)
         for i, chunk in enumerate(chunks):
             chunk.metadata["chunk_index"] = i
+            # Forward page-level metadata from parent document if not already set
+            if "page_number" not in chunk.metadata:
+                # Try to infer from content header "[Page N of M — ...]"
+                import re
+                m = re.search(r"\[Page (\d+) of (\d+)", chunk.page_content)
+                if m:
+                    chunk.metadata["page_number"] = int(m.group(1))
+                    chunk.metadata["total_pages"] = int(m.group(2))
+            # Mark table chunks explicitly
+            if "| --- |" in chunk.page_content or "| --- " in chunk.page_content:
+                chunk.metadata["has_table_content"] = True
         logger.info(f"Chunked {len(documents)} docs into {len(chunks)} chunks.")
         return chunks
 
@@ -277,6 +306,105 @@ class RAGService:
             "what checks", "next steps", "monitoring", "pkyc", "perpetual kyc"
         ]
         return any(keyword in query_lower for keyword in keywords)
+    
+    def _is_process_document_query(self, query: str) -> bool:
+        q = query.lower().strip()
+        keywords = [
+            "prioritization", "priority", "escalation", "escalated",
+            "review rules", "main review rules", "process document",
+            "process rules", "monitoring", "manual review",
+            "ongoing monitoring", "brd", "business requirements",
+            "uploaded process document",
+        ]
+        return any(k in q for k in keywords)
+
+    def _is_financial_analytical_query(self, query: str) -> bool:
+        """
+        Detect questions about financial data, annual reports, tables, graphs, charts.
+        These need DOCUMENT_ANALYSIS routing (top_k=16, strong LLM, big context).
+        """
+        q = query.lower()
+        keywords = [
+            # Financial metrics
+            "revenue", "net revenue", "total revenue",
+            "profit", "net profit", "gross profit", "operating profit",
+            "earnings", "eps", "earnings per share",
+            "ebitda", "ebit", "operating income", "net income",
+            "cash flow", "free cash flow", "operating cash flow",
+            "balance sheet", "income statement", "financial statement",
+            "assets", "total assets", "liabilities", "equity", "shareholders equity",
+            "market cap", "market capitalization",
+            "dividends", "dividend per share",
+            "return on equity", "roe", "return on assets", "roa",
+            "margin", "gross margin", "operating margin", "net margin",
+            "debt", "long-term debt", "short-term debt", "leverage",
+            "quarterly", "annual", "fiscal year", "fy20", "fy21", "fy22", "fy23", "fy24",
+            "q1", "q2", "q3", "q4",
+            # Report sections
+            "annual report", "10-k", "10k", "20-f", "proxy statement",
+            "risk factor", "risk factors",
+            "segment", "business segment", "revenue by segment",
+            "geographic", "revenue by region",
+            "headcount", "employees", "workforce",
+            # Visual content
+            "chart", "graph", "figure", "table", "exhibit",
+            "bar chart", "line graph", "pie chart",
+            "what does the chart", "what does the graph", "what does the table",
+            # Comparative
+            "year over year", "yoy", "compared to", "versus", "vs",
+            "increased", "decreased", "grew", "declined", "trend",
+            "highlight", "key financial", "financial highlight",
+            # Specific companies / report types
+            "goldman sachs", "annual results", "10-k filing",
+        ]
+        return any(k in q for k in keywords)
+
+    def _is_document_analysis_query(self, query: str) -> bool:
+        """
+        Detect questions about an uploaded document as a whole —
+        agreements, forms, AOFs, contracts, policies, clauses, parties, etc.
+        These need DOCUMENT_ANALYSIS routing (top_k=16, strong LLM).
+        """
+        q = query.lower()
+        keywords = [
+            # Summary / overview
+            "summarize", "summary", "what is this document", "what is the document",
+            "explain this document", "explain this agreement", "what does this document",
+            "what is this about", "what is the document about", "tell me about this document",
+            "overview of this", "in simple terms",
+            # Parties / signatories
+            "parties involved", "who are the parties", "party to this", "signatory",
+            "signatories", "both parties", "first party", "second party",
+            "who signed", "who are the signers",
+            # Legal clauses
+            "notice period", "governing law", "jurisdiction", "applicable law",
+            "termination clause", "termination condition", "termination",
+            "confidentiality clause", "confidentiality", "non-disclosure",
+            "renewal clause", "automatic renewal", "auto renewal",
+            "arbitration", "dispute resolution", "force majeure",
+            # Agreement details
+            "agreement date", "start date", "end date", "effective date",
+            "validity period", "expiry date", "commencement date",
+            "duration of this", "term of this",
+            # Obligations / responsibilities
+            "my responsibilities", "my obligations", "your responsibilities",
+            "obligations of", "responsibilities of", "other party",
+            "deliverables", "scope of work", "services provided",
+            # Payment
+            "payment terms", "payment amount", "payment schedule",
+            "fee structure", "charges mentioned",
+            # Risk / signing advice
+            "risky clause", "unfavorable clause", "one-sided", "should i sign",
+            "what should i check", "key risks", "important clauses",
+            "pay attention to", "before signing",
+            # Breach / penalties
+            "penalty", "penalties", "breach condition", "breach of contract",
+            "what happens if i break",
+            # Execution / signatures
+            "is it signed", "fully executed", "signature section", "stamp and seal",
+            "on what date was", "agreement signed", "signed on",
+        ]
+        return any(k in q for k in keywords)
 
     def _is_lookup_query(self, query: str) -> bool:
         """
@@ -311,10 +439,13 @@ class RAGService:
     def _select_answer_llm(self, query: str, config: dict, query_type: str):
         """
         Use fast model for greetings and lookups.
-        Use stronger model for broader case-analysis questions.
+        Use stronger model for document analysis, case questions, and complex reasoning.
         """
         if query_type in {"GREETING", "OUT_OF_SCOPE", "LOOKUP"}:
             return self._llm_fast
+
+        if query_type in {"DOCUMENT_ANALYSIS", "COMPLEX", "TRICKY", "ADVERSARIAL"}:
+            return self._llm
 
         if query_type == "SIMPLE" and not self._is_case_or_customer_query(query):
             return self._llm_fast
@@ -323,10 +454,23 @@ class RAGService:
 
     def _resolve_query_type(self, classified_type: str, query: str) -> str:
         """
-        Override classifier for exact lookup questions.
+        Override classifier with deterministic pattern matching.
+        Order matters: most specific checks first.
         """
         if self._is_lookup_query(query):
             return "LOOKUP"
+
+        # Financial / analytical report queries → maximum context + strong LLM
+        if self._is_financial_analytical_query(query):
+            return "DOCUMENT_ANALYSIS"
+
+        # Agreement / form / document-level analysis → maximum context
+        if self._is_document_analysis_query(query):
+            return "DOCUMENT_ANALYSIS"
+
+        if self._is_process_document_query(query):
+            return "COMPLEX"
+
         return classified_type
 
     # ==========================================
@@ -342,7 +486,14 @@ class RAGService:
             response = self._llm_classifier.invoke(prompt)
             category = response.content.strip().upper().replace(" ", "_")
             category = category if category in RETRIEVAL_CONFIG else "SIMPLE"
-            return self._resolve_query_type(category, query)
+
+            # Never block document-level questions as out-of-scope when docs are loaded
+            if category == "OUT_OF_SCOPE" and self.get_document_count() > 0:
+                category = "SIMPLE"
+
+            resolved = self._resolve_query_type(category, query)
+            logger.info(f"Query classified as: {resolved}")
+            return resolved
         except Exception as e:
             logger.warning(f"Classification failed, defaulting to SIMPLE: {e}")
             return self._resolve_query_type("SIMPLE", query)
@@ -356,9 +507,14 @@ class RAGService:
             response = await self._llm_classifier.ainvoke(prompt)
             category = response.content.strip().upper().replace(" ", "_")
             category = category if category in RETRIEVAL_CONFIG else "SIMPLE"
-            category = self._resolve_query_type(category, query)
-            logger.info(f"Query classified as: {category}")
-            return category
+
+            # Never block document-level questions as out-of-scope when docs are loaded
+            if category == "OUT_OF_SCOPE" and self.get_document_count() > 0:
+                category = "SIMPLE"
+
+            resolved = self._resolve_query_type(category, query)
+            logger.info(f"Query classified as: {resolved}")
+            return resolved
         except Exception as e:
             logger.warning(f"Async classification failed, defaulting to SIMPLE: {e}")
             return self._resolve_query_type("SIMPLE", query)
@@ -501,60 +657,61 @@ class RAGService:
         sorted_keys = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
         return [doc_map[key] for key in sorted_keys if key in doc_map][:fetch_k]
 
-    def _lookup_search(self, query: str, k: int = 2) -> List[Document]:
+    def _lookup_search(self, query: str, k: int = 6) -> List[Document]:
         """
-        Lightweight retrieval for exact factual questions.
-        No rerank, small fetch window.
+        Lightweight retrieval for factual questions.
+        Uses modest fetch window with BM25 merge.
         """
-        dense_results = self._vector_store.similarity_search(query, k=max(k, 2))
-        bm25_results = self._bm25_search(query, k=max(k, 2))
+        fetch_k = max(k + 4, 10)
+        dense_results = self._vector_store.similarity_search(query, k=fetch_k)
+        bm25_results = self._bm25_search(query, k=fetch_k)
         bm25_docs = [doc for doc, _ in bm25_results]
 
         if bm25_docs:
-            merged = self._rrf_merge(dense_results, bm25_docs, fetch_k=max(k, 2))
-            logger.info(f"Lookup search: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(merged[:k])} final (no rerank)")
+            merged = self._rrf_merge(dense_results, bm25_docs, fetch_k=fetch_k)
+            logger.info(f"Lookup: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(merged[:k])} final")
             return merged[:k]
 
-        logger.info(f"Lookup search: {len(dense_results)} dense only -> {len(dense_results[:k])} final (no rerank)")
+        logger.info(f"Lookup: {len(dense_results)} dense only -> {len(dense_results[:k])} final")
         return dense_results[:k]
 
-    async def _lookup_search_async(self, query: str, k: int = 2) -> List[Document]:
+    async def _lookup_search_async(self, query: str, k: int = 6) -> List[Document]:
         """
-        Async lightweight retrieval for exact factual questions.
-        No rerank.
+        Async factual retrieval with modest fetch window and BM25 merge.
         """
-        dense_task = self._vector_store.asimilarity_search(query, k=max(k, 2))
-        bm25_results = self._bm25_search(query, k=max(k, 2))
+        fetch_k = max(k + 4, 10)
+        dense_task = self._vector_store.asimilarity_search(query, k=fetch_k)
+        bm25_results = self._bm25_search(query, k=fetch_k)
         dense_results = await dense_task
         bm25_docs = [doc for doc, _ in bm25_results]
 
         if bm25_docs:
-            merged = self._rrf_merge(dense_results, bm25_docs, fetch_k=max(k, 2))
-            logger.info(f"Async lookup: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(merged[:k])} final (no rerank)")
+            merged = self._rrf_merge(dense_results, bm25_docs, fetch_k=fetch_k)
+            logger.info(f"Async lookup: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(merged[:k])} final")
             return merged[:k]
 
-        logger.info(f"Async lookup: {len(dense_results)} dense only -> {len(dense_results[:k])} final (no rerank)")
+        logger.info(f"Async lookup: {len(dense_results)} dense only -> {len(dense_results[:k])} final")
         return dense_results[:k]
 
     def hybrid_search(self, query: str, k: int = None) -> List[Document]:
         """Sync hybrid retrieval for reasoning-heavy questions."""
         k = k or settings.TOP_K_RESULTS
-        fetch_k = min(max(k + 2, 4), 6)  # safe reduced fetch window
+        # Generous fetch window — gather wide candidates, reranker picks the best
+        fetch_k = max(k * 2 + 5, 20)
         dense_results = self._vector_store.similarity_search(query, k=fetch_k)
         bm25_results = self._bm25_search(query, k=fetch_k)
         bm25_docs = [doc for doc, _ in bm25_results]
         merged = self._rrf_merge(dense_results, bm25_docs, fetch_k)
 
-        # cap rerank input
-        merged = merged[:6]
-
+        # Let FlashRank see all merged candidates — no artificial cap
         final = self._rerank(query, merged, top_k=k)
-        logger.info(f"Hybrid: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(final)} final")
+        logger.info(f"Hybrid: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(merged)} merged -> {len(final)} final (k={k})")
         return final
 
     async def _hybrid_search_async(self, query: str, k: int) -> List[Document]:
         """Async hybrid retrieval for reasoning-heavy questions."""
-        fetch_k = min(max(k + 2, 4), 6)  # safe reduced fetch window
+        # Generous fetch window — gather wide candidates, reranker picks the best
+        fetch_k = max(k * 2 + 5, 20)
 
         dense_task = self._vector_store.asimilarity_search(query, k=fetch_k)
         bm25_results = self._bm25_search(query, k=fetch_k)
@@ -563,12 +720,10 @@ class RAGService:
         bm25_docs = [doc for doc, _ in bm25_results]
         merged = self._rrf_merge(dense_results, bm25_docs, fetch_k)
 
-        # cap rerank input
-        merged = merged[:6]
-
+        # Let FlashRank see all merged candidates — no artificial cap
         final = self._rerank(query, merged, top_k=k)
 
-        logger.info(f"Async hybrid: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(final)} final")
+        logger.info(f"Async hybrid: {len(dense_results)} dense + {len(bm25_docs)} BM25 -> {len(merged)} merged -> {len(final)} final (k={k})")
         return final
 
     # ==========================================
@@ -623,13 +778,26 @@ class RAGService:
         return history_str
 
     def _build_sources_data(self, relevant_docs: List[Document]) -> List[dict]:
-        return [
-            {
-                "content": doc.page_content[:300] + ("..." if len(doc.page_content) > 300 else ""),
-                "metadata": doc.metadata,
-            }
-            for doc in relevant_docs
-        ]
+        seen = set()
+        sources = []
+        for doc in relevant_docs:
+            key = doc.page_content[:150]
+            if key in seen:
+                continue
+            seen.add(key)
+            meta = doc.metadata.copy()
+            # Add a human-readable citation label
+            source_name = meta.get("source", "Document")
+            page_num = meta.get("page_number")
+            if page_num:
+                meta["citation"] = f"{source_name} — Page {page_num}"
+            else:
+                meta["citation"] = source_name
+            sources.append({
+                "content": doc.page_content[:400] + ("..." if len(doc.page_content) > 400 else ""),
+                "metadata": meta,
+            })
+        return sources
 
     # ==========================================
     # Streaming Answer Pipeline
@@ -813,6 +981,38 @@ class RAGService:
             self._vector_store.delete_collection()
             self._init_vector_store()
             self._rebuild_bm25_index()
+
+    def remove_documents_by_source(self, filename: str) -> int:
+        """
+        Delete every chunk whose metadata["source"] == filename from ChromaDB,
+        then rebuild the BM25 index to stay in sync.
+        Returns the number of chunks deleted.
+        """
+        if not self._vector_store:
+            return 0
+        try:
+            collection = self._vector_store._collection
+
+            # Find IDs for this source
+            result = collection.get(
+                where={"source": filename},
+                include=[],   # only need IDs
+            )
+            ids = result.get("ids", [])
+            if not ids:
+                logger.info(f"No chunks found for source '{filename}' — nothing to delete.")
+                return 0
+
+            collection.delete(ids=ids)
+            logger.info(f"Deleted {len(ids)} chunks for source '{filename}' from ChromaDB.")
+
+            # Rebuild BM25 so it stays in sync with ChromaDB
+            self._rebuild_bm25_index()
+
+            return len(ids)
+        except Exception as e:
+            logger.error(f"Failed to remove documents for '{filename}': {e}")
+            return 0
 
 
 # Singleton

@@ -23,32 +23,37 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     # Chunking Configuration
-    CHUNK_SIZE: int = 500
-    CHUNK_OVERLAP: int = 50
+    # 1500 chars ≈ ~300 tokens — keeps financial tables, legal clauses, and
+    # policy paragraphs intact within a single chunk instead of splitting mid-sentence.
+    CHUNK_SIZE: int = 1500
+    CHUNK_OVERLAP: int = 200      # wider overlap so boundary context is never lost
 
     # Retrieval Configuration
-    TOP_K_RESULTS: int = 6
-    SIMILARITY_THRESHOLD: float = 0.7
+    TOP_K_RESULTS: int = 8        # default; overridden per query type in rag_service
+    SIMILARITY_THRESHOLD: float = 0.3   # was 0.7 — lower threshold returns more candidates
 
     # LLM Configuration
     TEMPERATURE: float = 0.0
-    MAX_TOKENS: int = 2048
+    MAX_TOKENS: int = 3000        # was 2048 — financial summaries need more room
 
     # Memory Configuration
-    MAX_MEMORY_MESSAGES: int = 5
+    MAX_MEMORY_MESSAGES: int = 8  # was 5 — longer conversation context
+
+    ANTHROPIC_API_KEY: str = ""
+    TESSERACT_CMD: str = "tesseract"
 
     # Upload Configuration
-    MAX_UPLOAD_SIZE_MB: int = 10
-    ALLOWED_EXTENSIONS: list = [".txt", ".pdf", ".docx", ".md", ".xlsx"]
+    MAX_UPLOAD_SIZE_MB: int = 20
+    ALLOWED_EXTENSIONS: list = [".txt", ".pdf", ".docx", ".md", ".xlsx", ".png", ".jpg", ".jpeg", ".pptx"]
 
-    # CORS — add your Vercel URL after deploying
+    # CORS — Vercel frontend URL is set here as the default
     CORS_ORIGINS: list = [
         "http://localhost:3000",
         "http://localhost:5173",
+        "https://kyc-bot.vercel.app",
     ]
-    # Set this env var on Render after you deploy frontend to Vercel
-    # Example: https://kyc-chatbot-eclerx.vercel.app
-    FRONTEND_URL: str = ""
+    # Vercel frontend URL — also set this as a Railway env var on the backend
+    FRONTEND_URL: str = "https://kyc-bot.vercel.app"
 
     class Config:
         env_file = ".env"

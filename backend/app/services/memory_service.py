@@ -25,6 +25,7 @@ class SessionMemory:
         self.history: List[Tuple[str, str]] = []  # List of (human, ai) tuples
         self.created_at = _utcnow()
         self.last_active = _utcnow()
+        self.structured_state: Dict[str, object] = {}
 
     def add_exchange(self, human_message: str, ai_message: str):
         """Add a human-AI exchange to memory."""
@@ -42,6 +43,7 @@ class SessionMemory:
     def clear(self):
         """Clear all conversation history."""
         self.history = []
+        self.structured_state = {}
 
     @property
     def message_count(self) -> int:
@@ -136,6 +138,21 @@ class MemoryService:
             logger.info(f"Cleaned up inactive session: {session_id}")
 
         return len(to_remove)
+    def set_structured_state(self, session_id: str, key: str, value):
+        session = self.get_or_create_session(session_id)
+        session.structured_state[key] = value
+
+    def get_structured_state(self, session_id: str, key: str, default=None):
+        session = self.get_or_create_session(session_id)
+        return session.structured_state.get(key, default)
+
+    def clear_structured_state(self, session_id: str, key: str = None):
+        session = self.get_or_create_session(session_id)
+        if key is None:
+            session.structured_state = {}
+        else:
+            session.structured_state.pop(key, None)
+
 
 
 # Singleton instance
