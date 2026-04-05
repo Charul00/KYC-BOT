@@ -342,6 +342,38 @@ class RAGService:
         ]
         return any(keyword in query_lower for keyword in keywords)
     
+    def _is_image_query(self, query: str) -> bool:
+        """Detect when the user is asking about a specific uploaded image or diagram."""
+        q = query.lower()
+        return any(k in q for k in [
+            "this image", "the image", "this diagram", "the diagram",
+            "this flowchart", "the flowchart", "this chart", "the chart",
+            "this png", "this jpeg", "this jpg", "the png", "the flow",
+            "in this image", "from this image", "based on this image",
+            "shown in", "depicted in", "illustrated in", "in the diagram",
+            "explain this image", "analyze this image", "read this image",
+            "what does this image", "what does the image", "what does the diagram",
+        ])
+
+    def _get_image_filtered_docs(self, query: str, k: int) -> List[Document]:
+        """Retrieve chunks only from image-type sources (PNG, JPG, JPEG)."""
+        try:
+            image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+            all_image_docs = []
+            for ext in image_extensions:
+                results = self._vector_store.similarity_search(
+                    query,
+                    k=k,
+                    filter={"file_type": ext},
+                )
+                all_image_docs.extend(results)
+            if all_image_docs:
+                # Rerank to pick best among image chunks
+                return self._rerank(query, all_image_docs, top_k=k)
+        except Exception:
+            pass
+        return []
+
     def _is_process_document_query(self, query: str) -> bool:
         q = query.lower().strip()
         keywords = [
@@ -892,13 +924,28 @@ class RAGService:
                 return
 
             # Step 3: retrieval
-            if query_type == "LOOKUP":
+            # If user is asking about a specific image/diagram, filter to image sources only
+            if self._is_image_query(query):
+                relevant_docs = self._get_image_filtered_docs(search_query, k=config["top_k"])
+                if relevant_docs:
+                    logger.info(f"Image query detected — retrieved {len(relevant_docs)} chunks from image sources only.")
+                else:
+                    # fallback to normal retrieval if no image chunks found
+                    relevant_docs = await self._hybrid_search_async(search_query, k=config["top_k"])
+            elif query_type == "LOOKUP":
                 relevant_docs = await self._lookup_search_async(search_query, k=config["top_k"])
             else:
                 relevant_docs = await self._hybrid_search_async(search_query, k=config["top_k"])
 
-            # Step 4: build context
-            context = "\n\n---\n\n".join(doc.page_content for doc in relevant_docs)
+            # Step 4: build context — label each chunk with its source so the LLM
+            # knows which document each piece of information comes from.
+            context_parts = []
+            for doc in relevant_docs:
+                source = doc.metadata.get("source", "Document")
+                page = doc.metadata.get("page_number")
+                label = f"[SOURCE: {source}" + (f" — Page {page}" if page else "") + "]"
+                context_parts.append(f"{label}\n{doc.page_content}")
+            context = "\n\n---\n\n".join(context_parts)
             if not context.strip():
                 context = "[No relevant document sections were found for this query.]"
 
