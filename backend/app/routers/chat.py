@@ -355,6 +355,27 @@ async def list_documents():
     return {"documents": document_service.list_documents()}
 
 
+@router.get("/documents/download/{filename}")
+async def download_document(filename: str):
+    """Download a file from the documents directory."""
+    from fastapi.responses import FileResponse
+    from app.config import settings
+    import pathlib
+
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    file_path = pathlib.Path(settings.DOCUMENTS_DIR) / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/octet-stream",
+    )
+
+
 @router.delete("/documents/{filename}")
 async def delete_document(filename: str):
     """
