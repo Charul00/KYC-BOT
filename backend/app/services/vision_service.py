@@ -205,21 +205,25 @@ class VisionService:
                 f"You are analysing {page_ref} of a business document.\n\n"
                 "This may be a flowchart, process diagram, decision tree, organisational chart, "
                 "financial chart, or any other visual content.\n\n"
-                "Describe ALL visual content in plain text. Include:\n"
-                "1. FLOWCHARTS / PROCESS DIAGRAMS — List every step, node, and decision point "
-                "in order. For each decision diamond include the Yes and No paths. "
-                "Include exact text from every box, arrow label, and connector. "
-                "Describe the starting point, all branches, and the ending point(s).\n"
+                "Describe ALL visual content in plain text. Follow these rules STRICTLY:\n\n"
+                "1. FLOWCHARTS / PROCESS DIAGRAMS:\n"
+                "   a. State the EXACT starting node text and its shape (e.g. parallelogram, oval, rectangle).\n"
+                "   b. Count and list EVERY decision diamond — number them 1, 2, 3... with exact label text.\n"
+                "   c. For EACH decision diamond state BOTH the Yes path AND the No path with exact destination text.\n"
+                "   d. Trace the COMPLETE flow in strict order from start to end — do not skip any intermediate steps.\n"
+                "   e. State the EXACT text and shape of the final/end node(s).\n"
+                "   f. Note the COLOR of each shape type (e.g. 'decision diamonds are green', 'process boxes are blue', 'end node is pink/red').\n"
+                "   g. Note the GEOMETRIC SHAPE of each node type (parallelogram=start/end, diamond=decision, rectangle=process, rounded rectangle=terminal).\n\n"
                 "2. Charts or graphs — what they show, axes labels, and key data values or trends.\n"
                 "3. Tables — column headers and important rows/values.\n"
                 "4. Text callouts, annotations, or highlighted figures.\n\n"
                 "Be exhaustive — include the EXACT TEXT from every shape/box in the diagram. "
                 "Do NOT summarise or paraphrase the node labels. "
-                "Write in clear prose paragraphs. Do NOT output JSON. "
-                "Keep response under 800 words.\n"
+                "Write in clear numbered steps. Do NOT output JSON. "
+                "Keep response under 1000 words.\n"
             )
 
-            description = self._call(image_b64, prompt, max_tokens=1200).strip()
+            description = self._call(image_b64, prompt, max_tokens=1500).strip()
 
             if len(description) < 20:
                 return ""
