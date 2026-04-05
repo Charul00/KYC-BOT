@@ -173,7 +173,10 @@ class DocumentService:
             _prog(55, "Text extracted", "Preparing chunks…")
 
         _prog(65, "Chunking & embedding", "Splitting into chunks and building vector index…")
-        chunks_created = rag_service.add_documents(docs)
+        if file_ext == ".xlsx":
+            chunks_created = rag_service.add_documents_large(docs)
+        else:
+            chunks_created = rag_service.add_documents(docs)
         _prog(82, "Index built", f"{chunks_created} chunks indexed into vector store…")
 
         if file_ext == ".xlsx":

@@ -98,7 +98,6 @@ class RAGService:
         self._embeddings = OpenAIEmbeddings(
             model=settings.EMBEDDING_MODEL,
             openai_api_key=settings.OPENAI_API_KEY,
-            chunk_size=500,  # texts per OpenAI API call — good balance for normal PDF/DOCX files
         )
 
         # Primary splitter — respects paragraph / table / page boundaries
@@ -281,55 +280,44 @@ class RAGService:
         return chunks
 
     def add_documents(self, documents: List[Document]) -> int:
-        """Add documents: chunk -> embed (rate-limited batches) -> store in ChromaDB + rebuild BM25."""
+        """Add documents: chunk -> embed -> store in ChromaDB + rebuild BM25."""
+        chunks = self.chunk_documents(documents)
+        if chunks:
+            self._vector_store.add_documents(chunks)
+            self._rebuild_bm25_index()
+            logger.info(f"Added {len(chunks)} chunks. BM25 index refreshed.")
+        return len(chunks)
+
+    def add_documents_large(self, documents: List[Document]) -> int:
+        """Add large documents (Excel) in rate-limited batches to avoid OpenAI 1M TPM limit."""
         import time
 
         chunks = self.chunk_documents(documents)
         if not chunks:
             return 0
 
+        EMBED_BATCH = 200
         total = len(chunks)
+        logger.info(f"Ingesting {total} chunks in batches of {EMBED_BATCH} with rate-limit backoff…")
 
-        # Small files (PDF, DOCX) — under 1000 chunks — embed in one shot, no delay needed.
-        # Large files (Excel 10k+ chunks) — use batches with sleep to stay under 1M TPM limit.
-        LARGE_FILE_THRESHOLD = 1000
-        EMBED_BATCH = 200  # chunks per iteration for large files
-
-        if total <= LARGE_FILE_THRESHOLD:
-            # Fast path: PDF / DOCX — single call, no throttling
-            logger.info(f"Ingesting {total} chunks (fast path)…")
+        for start in range(0, total, EMBED_BATCH):
+            batch = chunks[start : start + EMBED_BATCH]
             while True:
                 try:
-                    self._vector_store.add_documents(chunks)
+                    self._vector_store.add_documents(batch)
                     break
                 except Exception as e:
                     err = str(e)
                     if "429" in err or "rate" in err.lower():
-                        logger.warning(f"Rate limit on fast path, waiting 5s…")
-                        time.sleep(5)
+                        wait = 15
+                        logger.warning(f"Rate limit at chunk {start}, waiting {wait}s…")
+                        time.sleep(wait)
                     else:
                         raise
-        else:
-            # Slow path: large Excel — batched with 1s delay to avoid 1M TPM rate limit
-            logger.info(f"Ingesting {total} chunks in batches of {EMBED_BATCH} with rate-limit backoff…")
-            for start in range(0, total, EMBED_BATCH):
-                batch = chunks[start : start + EMBED_BATCH]
-                while True:
-                    try:
-                        self._vector_store.add_documents(batch)
-                        break
-                    except Exception as e:
-                        err = str(e)
-                        if "429" in err or "rate" in err.lower():
-                            wait = 15
-                            logger.warning(f"Rate limit at chunk {start}, waiting {wait}s…")
-                            time.sleep(wait)
-                        else:
-                            raise
-                pct = min(int((start + len(batch)) / total * 100), 99)
-                logger.info(f"Embedded {start + len(batch)}/{total} chunks ({pct}%)")
-                if start + EMBED_BATCH < total:
-                    time.sleep(1)  # 1s pause keeps rate under ~900K TPM
+            pct = min(int((start + len(batch)) / total * 100), 99)
+            logger.info(f"Embedded {start + len(batch)}/{total} chunks ({pct}%)")
+            if start + EMBED_BATCH < total:
+                time.sleep(1)  # 1s pause keeps rate under ~900K TPM
 
         self._rebuild_bm25_index()
         logger.info(f"Added {total} chunks total. BM25 index refreshed.")
