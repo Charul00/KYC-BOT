@@ -245,20 +245,29 @@ class DocumentService:
 
         merged = image_merge_service.merge(bundle.quality, ocr_result, vision_result)
 
-        # For flowcharts / diagrams / process screenshots — run a second vision call
-        # with analyze_chart() to capture the actual flow content in plain text.
-        # This is critical because the KYC identity prompt leaves flowchart nodes empty.
+        # Step 1: Detect the actual visual category of this image (flowchart / graph / table / other)
+        # This is a fast single-word GPT-4o call that drives which detailed prompt we use next.
         doc_type = vision_result.get("doc_type", "unknown")
-        diagram_types = {"process_screenshot", "policy_screenshot", "unknown"}
-        if doc_type in diagram_types:
-            chart_description = vision_service.analyze_chart(image_path, page_num=0)
+        identity_types = {"aadhaar_card", "pan_card", "passport", "kyc_form"}
+
+        if doc_type not in identity_types:
+            # Step 2: Classify visual type dynamically
+            image_category = vision_service._detect_image_category(image_path)
+            logger.info(f"Image visual category: {image_category} (doc_type={doc_type})")
+
+            # Step 3: Run type-specific detailed analysis
+            chart_description = vision_service.analyze_chart(
+                image_path, page_num=0, image_category=image_category
+            )
             if chart_description and len(chart_description) > 30:
-                logger.info(f"Diagram detected ({doc_type}) — appending chart description ({len(chart_description)} chars)")
+                logger.info(f"Visual content extracted ({image_category}) — {len(chart_description)} chars")
                 merged["merged_text"] = (
                     merged["merged_text"]
-                    + "\n\nDiagram / Flowchart Content:\n"
+                    + f"\n\nVisual Content [{image_category}]:\n"
                     + chart_description
                 )
+                # Store category in metadata so retrieval can use it
+                merged["image_category"] = image_category
 
         metadata = {
             "doc_type": merged.get("doc_type", "unknown"),

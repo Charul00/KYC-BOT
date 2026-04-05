@@ -186,42 +186,103 @@ class VisionService:
             logger.warning(f"vision_service.analyze() failed for {file_path}: {exc}")
             return self._empty_kyc_result()
 
+    def _detect_image_category(self, file_path: Path) -> str:
+        """
+        First-pass GPT-4o call: classify what kind of visual this image is.
+        Returns one of: flowchart | graph | table | identity_doc | other
+        """
+        try:
+            image_b64, _ = _load_and_resize(file_path)
+            prompt = (
+                "Look at this image and classify it into exactly ONE category.\n"
+                "Reply with ONLY one word from this list:\n"
+                "- flowchart  (process flow, decision tree, workflow diagram, org chart)\n"
+                "- graph      (bar chart, line chart, pie chart, scatter plot, histogram)\n"
+                "- table      (data table, spreadsheet screenshot, financial statement)\n"
+                "- identity_doc  (Aadhaar, PAN card, passport, driving licence, bank statement)\n"
+                "- other      (anything else: photo, screenshot, map, etc.)\n\n"
+                "Reply with ONE word only. No explanation."
+            )
+            raw = self._call(image_b64, prompt, max_tokens=10).strip().lower()
+            if raw in {"flowchart", "graph", "table", "identity_doc", "other"}:
+                logger.info(f"Image category detected: {raw} for {file_path.name}")
+                return raw
+            return "other"
+        except Exception as exc:
+            logger.warning(f"Image category detection failed: {exc}")
+            return "other"
+
     # ------------------------------------------------------------------
     # Public: PDF chart / graph description
     # ------------------------------------------------------------------
 
-    def analyze_chart(self, file_path: Path, page_num: int = 0) -> str:
+    # Type-specific prompts for different image categories
+    _PROMPTS = {
+        "flowchart": (
+            "You are analysing a flowchart or process diagram.\n\n"
+            "Describe it EXHAUSTIVELY in plain text. Follow STRICTLY:\n"
+            "1. State the EXACT text and SHAPE of the starting node (parallelogram = input/trigger, oval = start/end).\n"
+            "2. Count ALL decision diamonds — number them 1, 2, 3... with EXACT label text from the image.\n"
+            "3. For EACH decision: state BOTH Yes path destination AND No path destination with exact text.\n"
+            "4. Trace the COMPLETE flow in strict top-to-bottom order — do NOT skip any intermediate steps.\n"
+            "5. State the EXACT text and shape of all end/terminal nodes.\n"
+            "6. Note the COLOR of each shape type (e.g. 'process boxes are blue', 'decision diamonds are green', 'end node is pink/red rounded rectangle').\n"
+            "7. Note GEOMETRIC SHAPE of each node type.\n"
+            "Use numbered steps. Include exact quoted text for every node. Do NOT output JSON. Max 1000 words."
+        ),
+        "graph": (
+            "You are analysing a chart or graph.\n\n"
+            "Describe it EXHAUSTIVELY in plain text:\n"
+            "1. Chart type (bar, line, pie, scatter, histogram, etc.).\n"
+            "2. Title of the chart (exact text).\n"
+            "3. X-axis label and range of values.\n"
+            "4. Y-axis label and range of values.\n"
+            "5. All data series / legend labels with their colors.\n"
+            "6. Key data points, peaks, troughs — include EXACT numbers.\n"
+            "7. Overall trend or insight the chart shows.\n"
+            "8. Any annotations, callouts, or highlighted values.\n"
+            "Write in clear prose. Do NOT output JSON. Max 600 words."
+        ),
+        "table": (
+            "You are analysing a data table or financial statement.\n\n"
+            "Describe it EXHAUSTIVELY in plain text:\n"
+            "1. Table title or heading (exact text).\n"
+            "2. All column headers in order (exact text).\n"
+            "3. Number of rows.\n"
+            "4. First 10 rows of data with all column values.\n"
+            "5. Any totals, subtotals, or summary rows.\n"
+            "6. Any highlighted, bold, or specially formatted cells and what they contain.\n"
+            "7. Any footnotes or legends below the table.\n"
+            "Write in clear prose. Do NOT output JSON. Max 600 words."
+        ),
+        "other": (
+            "You are analysing a business image or document screenshot.\n\n"
+            "Describe ALL visible content in plain text:\n"
+            "1. What type of document or image this appears to be.\n"
+            "2. All text visible in the image — read it carefully and quote exactly.\n"
+            "3. Any diagrams, icons, logos, or visual elements and what they show.\n"
+            "4. Layout and structure of the content.\n"
+            "5. Any numbers, dates, names, or key data points visible.\n"
+            "Write in clear prose. Do NOT output JSON. Max 600 words."
+        ),
+    }
+
+    def analyze_chart(self, file_path: Path, page_num: int = 0, image_category: str = None) -> str:
         """
-        Analyse a PDF page image for charts, graphs, tables, and visual content.
-        Returns a plain-text description string (suitable for RAG indexing).
-        On any error returns empty string (caller skips gracefully).
+        Analyse an image with a type-specific prompt for maximum accuracy.
+        - flowchart: exhaustive node/decision/color/shape description
+        - graph: axes, data points, trends
+        - table: headers, rows, values
+        - other: general content extraction
+        Returns plain-text description for RAG indexing.
         """
         try:
             image_b64, _ = _load_and_resize(file_path)
 
-            page_ref = f"page {page_num}" if page_num else "this page"
-
-            prompt = (
-                f"You are analysing {page_ref} of a business document.\n\n"
-                "This may be a flowchart, process diagram, decision tree, organisational chart, "
-                "financial chart, or any other visual content.\n\n"
-                "Describe ALL visual content in plain text. Follow these rules STRICTLY:\n\n"
-                "1. FLOWCHARTS / PROCESS DIAGRAMS:\n"
-                "   a. State the EXACT starting node text and its shape (e.g. parallelogram, oval, rectangle).\n"
-                "   b. Count and list EVERY decision diamond — number them 1, 2, 3... with exact label text.\n"
-                "   c. For EACH decision diamond state BOTH the Yes path AND the No path with exact destination text.\n"
-                "   d. Trace the COMPLETE flow in strict order from start to end — do not skip any intermediate steps.\n"
-                "   e. State the EXACT text and shape of the final/end node(s).\n"
-                "   f. Note the COLOR of each shape type (e.g. 'decision diamonds are green', 'process boxes are blue', 'end node is pink/red').\n"
-                "   g. Note the GEOMETRIC SHAPE of each node type (parallelogram=start/end, diamond=decision, rectangle=process, rounded rectangle=terminal).\n\n"
-                "2. Charts or graphs — what they show, axes labels, and key data values or trends.\n"
-                "3. Tables — column headers and important rows/values.\n"
-                "4. Text callouts, annotations, or highlighted figures.\n\n"
-                "Be exhaustive — include the EXACT TEXT from every shape/box in the diagram. "
-                "Do NOT summarise or paraphrase the node labels. "
-                "Write in clear numbered steps. Do NOT output JSON. "
-                "Keep response under 1000 words.\n"
-            )
+            # Use provided category or fall back to "other"
+            category = image_category if image_category in self._PROMPTS else "other"
+            prompt = self._PROMPTS[category]
+            logger.info(f"analyze_chart using prompt type: {category} for {file_path.name}")
 
             description = self._call(image_b64, prompt, max_tokens=1500).strip()
 
