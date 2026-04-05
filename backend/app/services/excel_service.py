@@ -23,9 +23,9 @@ class ExcelQueryService:
 
     Flow:
     1. Load workbook sheets
-    2. Infer schema with LLM
+    2. Infer schema with LLM (includes sample categorical values)
     3. Resolve follow-up dynamically
-    4. Plan query with LLM
+    4. Plan query with LLM (sheet selection + intent)
     5. Execute deterministically with pandas
     6. Compose natural answer with LLM
     """
@@ -37,7 +37,7 @@ class ExcelQueryService:
         self._llm = ChatOpenAI(
             model_name="gpt-4o-mini",
             temperature=0.0,
-            max_tokens=1200,
+            max_tokens=1500,
             openai_api_key=settings.OPENAI_API_KEY,
         )
 
@@ -132,9 +132,28 @@ class ExcelQueryService:
     # Schema Understanding
     # =========================
 
+    def _get_categorical_sample_values(self, df: pd.DataFrame, max_cols: int = 20) -> dict:
+        """
+        For each column with few unique values (categorical-like), collect the
+        distinct values so the LLM can use the exact correct filter values.
+        """
+        sample_values = {}
+        for col in df.columns[:max_cols]:
+            try:
+                n_unique = df[col].nunique(dropna=True)
+                # Only for low-cardinality (categorical) columns
+                if 1 < n_unique <= 30:
+                    vals = df[col].dropna().unique().tolist()
+                    # Convert to string safely
+                    sample_values[col] = [str(v) for v in vals[:30]]
+            except Exception:
+                pass
+        return sample_values
+
     def _infer_schema_for_df(self, key: str, df: pd.DataFrame) -> dict:
         sample_rows = df.head(5).fillna("").to_dict(orient="records")
         sheet_name = key.split("::", 1)[1] if "::" in key else key
+        categorical_values = self._get_categorical_sample_values(df)
 
         prompt = (
             EXCEL_SCHEMA_PROMPT
@@ -144,8 +163,19 @@ class ExcelQueryService:
             + f"Sample rows: {json.dumps(sample_rows, ensure_ascii=False)}"
         )
 
-        response = self._llm.invoke(prompt)
-        return json.loads(response.content.strip())
+        try:
+            response = self._llm.invoke(prompt)
+            raw = response.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```", 2)[-1].lstrip("json").strip().rstrip("```").strip()
+            result = json.loads(raw)
+        except Exception as e:
+            logger.warning(f"Schema LLM parse failed: {e}")
+            result = {"sheet_purpose": sheet_name, "columns": []}
+
+        # Attach categorical sample values directly to the schema
+        result["sample_values"] = categorical_values
+        return result
 
     def _get_schema_summary(self) -> dict:
         summary = {"sheets": []}
@@ -157,6 +187,7 @@ class ExcelQueryService:
                     "row_count": len(df),
                     "columns": schema.get("columns", []),
                     "sheet_purpose": schema.get("sheet_purpose", ""),
+                    "sample_values": schema.get("sample_values", {}),
                 }
             )
         return summary
@@ -264,7 +295,9 @@ class ExcelQueryService:
                 if sheet_name_hint in key.lower():
                     logger.info(f"Excel: partial-matched sheet '{key}' from hint '{sheet_key}'")
                     return self._cache[key]
-            logger.warning(f"Excel: sheet_key '{sheet_key}' not found in cache keys: {list(self._cache.keys())}. Falling back.")
+            logger.warning(
+                f"Excel: sheet_key '{sheet_key}' not found. Available: {list(self._cache.keys())}. Falling back."
+            )
 
         return self._get_best_df()
 
@@ -277,17 +310,18 @@ class ExcelQueryService:
             val = f.get("value")
 
             if col not in result.columns:
+                logger.warning(f"Filter column '{col}' not found. Available: {list(result.columns)}")
                 continue
 
             series = result[col]
 
+            # --- Numeric operators ---
             if op in {"gt", "gte", "lt", "lte"}:
                 numeric_series = pd.to_numeric(series, errors="coerce")
                 try:
                     numeric_val = float(val)
                 except Exception:
                     continue
-
                 if op == "gt":
                     result = result[numeric_series > numeric_val]
                 elif op == "gte":
@@ -297,21 +331,61 @@ class ExcelQueryService:
                 elif op == "lte":
                     result = result[numeric_series <= numeric_val]
 
+            # --- Equality ---
             elif op == "equals":
-                result = result[series.astype(str).str.lower() == str(val).lower()]
+                result = result[series.astype(str).str.strip().str.lower() == str(val).strip().lower()]
 
+            elif op == "not_equals":
+                result = result[series.astype(str).str.strip().str.lower() != str(val).strip().lower()]
+
+            # --- Text search ---
             elif op == "contains":
                 result = result[series.astype(str).str.lower().str.contains(str(val).lower(), na=False)]
+
+            # --- Date operators ---
+            elif op == "date_month":
+                # val format: "YYYY-MM" e.g. "2024-01"
+                try:
+                    dt_series = pd.to_datetime(series, errors="coerce")
+                    period = pd.Period(str(val), freq="M")
+                    result = result[dt_series.dt.to_period("M") == period]
+                except Exception as e:
+                    logger.warning(f"date_month filter failed: {e}")
+
+            elif op == "date_year":
+                # val format: "YYYY" e.g. "2024"
+                try:
+                    dt_series = pd.to_datetime(series, errors="coerce")
+                    result = result[dt_series.dt.year == int(val)]
+                except Exception as e:
+                    logger.warning(f"date_year filter failed: {e}")
+
+            elif op == "date_range":
+                # val format: "YYYY-MM-DD,YYYY-MM-DD"
+                try:
+                    parts = str(val).split(",", 1)
+                    start = pd.to_datetime(parts[0].strip())
+                    end = pd.to_datetime(parts[1].strip())
+                    dt_series = pd.to_datetime(series, errors="coerce")
+                    result = result[(dt_series >= start) & (dt_series <= end)]
+                except Exception as e:
+                    logger.warning(f"date_range filter failed: {e}")
 
         return result
 
     def _execute_plan(self, query: str, plan: dict) -> dict:
+        intent = plan.get("intent", "unsupported")
+
+        # Ratio intent needs special handling (two separate filter counts)
+        if intent == "ratio":
+            return self._execute_ratio(plan)
+
         df = self._select_df_for_plan(plan)
         if df is None or df.empty:
             return {"status": "error", "message": "No Excel data available."}
-        logger.info(f"Excel execute: sheet_key='{plan.get('sheet_key')}' df.shape={df.shape} intent={plan.get('intent')}")
-
-        intent = plan.get("intent", "unsupported")
+        logger.info(
+            f"Excel execute: sheet_key='{plan.get('sheet_key')}' df.shape={df.shape} intent={intent}"
+        )
 
         if intent == "followup_last_results":
             return {
@@ -327,6 +401,7 @@ class ExcelQueryService:
         aggregation = plan.get("aggregation", "none")
 
         result_df = self._apply_filters(df, filters)
+        logger.info(f"After filters: {len(result_df)} rows (was {len(df)})")
 
         sort_col = sort_by.get("column") if isinstance(sort_by, dict) else None
         sort_order = sort_by.get("order", "asc") if isinstance(sort_by, dict) else "asc"
@@ -335,6 +410,35 @@ class ExcelQueryService:
             temp[sort_col] = pd.to_numeric(temp[sort_col], errors="ignore")
             result_df = temp.sort_values(by=sort_col, ascending=(sort_order != "desc"))
 
+        # --- group_count: "most common X", "which X has most" ---
+        if intent == "group_count":
+            if not group_by:
+                return {"status": "error", "message": "No group_by column specified for group_count."}
+            group_col = group_by[0]
+            if group_col not in result_df.columns:
+                return {"status": "error", "message": f"Column '{group_col}' not found."}
+
+            counts = (
+                result_df.groupby(group_col, dropna=True)
+                .size()
+                .sort_values(ascending=False)
+                .reset_index(name="count")
+            )
+            top_value = str(counts.iloc[0][group_col]) if not counts.empty else None
+            top_count = int(counts.iloc[0]["count"]) if not counts.empty else 0
+
+            return {
+                "status": "ok",
+                "intent": "group_count",
+                "group_column": group_col,
+                "top_value": top_value,
+                "top_count": top_count,
+                "rows": counts.head(limit).to_dict(orient="records"),
+                "row_count": len(counts),
+                "columns": [group_col, "count"],
+            }
+
+        # --- lookup / filter / rank ---
         if intent in {"lookup", "filter", "rank"}:
             if result_df.empty:
                 return {
@@ -359,6 +463,7 @@ class ExcelQueryService:
                 "columns": list(result_df.columns),
             }
 
+        # --- count ---
         if intent == "count" or aggregation == "count":
             return {
                 "status": "ok",
@@ -366,19 +471,22 @@ class ExcelQueryService:
                 "value": int(len(result_df)),
             }
 
+        # --- aggregate (sum / average / min / max) ---
         if intent == "aggregate":
             if not target_columns:
                 return {"status": "error", "message": "No target column for aggregation."}
 
             col = target_columns[0]
             if col not in result_df.columns:
-                return {"status": "error", "message": f"Column {col} not found."}
+                return {"status": "error", "message": f"Column '{col}' not found."}
 
             numeric_col = pd.to_numeric(result_df[col], errors="coerce").dropna()
             if numeric_col.empty:
-                return {"status": "error", "message": f"Column {col} is not numeric."}
+                return {"status": "error", "message": f"Column '{col}' has no numeric values."}
 
-            if aggregation == "average":
+            if aggregation == "sum":
+                value = float(numeric_col.sum())
+            elif aggregation == "average":
                 value = float(numeric_col.mean())
             elif aggregation == "min":
                 value = float(numeric_col.min())
@@ -393,14 +501,40 @@ class ExcelQueryService:
                 "aggregation": aggregation,
                 "column": col,
                 "value": value,
+                "row_count": len(result_df),
             }
 
-        if intent == "compare" and group_by and target_columns:
-            group_col = group_by[0]
-            target_col = target_columns[0]
+        # --- compare: group_by + numeric aggregation ---
+        if intent == "compare":
+            if not group_by:
+                return {"status": "error", "message": "No group_by column for compare."}
 
-            if group_col not in result_df.columns or target_col not in result_df.columns:
-                return {"status": "error", "message": "Required columns for comparison not found."}
+            group_col = group_by[0]
+            if group_col not in result_df.columns:
+                return {"status": "error", "message": f"Group column '{group_col}' not found."}
+
+            # If no target column → fall back to count by group (same as group_count)
+            if not target_columns:
+                counts = (
+                    result_df.groupby(group_col, dropna=True)
+                    .size()
+                    .sort_values(ascending=False)
+                    .reset_index(name="count")
+                )
+                return {
+                    "status": "ok",
+                    "intent": "group_count",
+                    "group_column": group_col,
+                    "top_value": str(counts.iloc[0][group_col]) if not counts.empty else None,
+                    "top_count": int(counts.iloc[0]["count"]) if not counts.empty else 0,
+                    "rows": counts.head(limit).to_dict(orient="records"),
+                    "row_count": len(counts),
+                    "columns": [group_col, "count"],
+                }
+
+            target_col = target_columns[0]
+            if target_col not in result_df.columns:
+                return {"status": "error", "message": f"Target column '{target_col}' not found."}
 
             temp = result_df.copy()
             temp[target_col] = pd.to_numeric(temp[target_col], errors="coerce")
@@ -412,7 +546,6 @@ class ExcelQueryService:
                 .sort_values(ascending=False)
                 .reset_index()
             )
-
             grouped = grouped.head(limit)
 
             return {
@@ -426,6 +559,37 @@ class ExcelQueryService:
         return {
             "status": "error",
             "message": f"Unsupported or unresolved intent: {intent}",
+        }
+
+    def _execute_ratio(self, plan: dict) -> dict:
+        """
+        Computes numerator_count / denominator_count as a percentage.
+        Both counts come from the same sheet.
+        """
+        df = self._select_df_for_plan(plan)
+        if df is None or df.empty:
+            return {"status": "error", "message": "No Excel data available."}
+
+        numerator_filters = plan.get("numerator_filters", plan.get("filters", []))
+        denominator_filters = plan.get("denominator_filters", [])
+
+        numerator_df = self._apply_filters(df, numerator_filters)
+        denominator_df = self._apply_filters(df, denominator_filters) if denominator_filters else df
+
+        numerator = len(numerator_df)
+        denominator = len(denominator_df)
+        percentage = round((numerator / denominator * 100), 2) if denominator > 0 else 0.0
+
+        logger.info(
+            f"Excel ratio: numerator={numerator} denominator={denominator} pct={percentage}%"
+        )
+
+        return {
+            "status": "ok",
+            "intent": "ratio",
+            "numerator": numerator,
+            "denominator": denominator,
+            "percentage": percentage,
         }
 
     # =========================
@@ -484,7 +648,7 @@ class ExcelQueryService:
             return self._compose_answer(query, plan, execution_result)
 
         except Exception as e:
-            logger.error(f"Excel intelligent query failed: {e}")
+            logger.error(f"Excel intelligent query failed: {e}", exc_info=True)
             return "I encountered an error while analyzing the uploaded Excel data."
 
 

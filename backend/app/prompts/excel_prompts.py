@@ -38,48 +38,99 @@ EXCEL_QUERY_PLAN_PROMPT = """You are an expert spreadsheet query planner.
 
 You will be given:
 1. User query
-2. Spreadsheet schema information (multiple sheets with sheet_key, row_count, columns, sheet_purpose)
+2. Spreadsheet schema (multiple sheets with sheet_key, row_count, columns, sheet_purpose, and sample_values for categorical columns)
 
-Your task is to decide WHICH sheet to query and HOW to answer the query from structured spreadsheet data.
+Your task is to decide WHICH sheet to query and HOW to answer.
 
-Return ONLY valid JSON with this structure:
+Return ONLY valid JSON matching ONE of the structures below based on intent.
+
+--- STANDARD INTENTS ---
+For lookup / filter / count / aggregate / compare / rank:
 
 {
-  "intent": "<one of: lookup, filter, count, aggregate, compare, rank, unsupported>",
-  "sheet_key": "<exact sheet_key string from the schema that best answers this query>",
-  "target_columns": ["<column name>", "<column name>"],
+  "intent": "<lookup | filter | count | aggregate | compare | rank>",
+  "sheet_key": "<exact sheet_key from schema>",
+  "target_columns": ["<col>"],
   "filters": [
-    {
-      "column": "<column name>",
-      "operator": "<one of: equals, contains, gt, gte, lt, lte>",
-      "value": "<value>"
-    }
+    {"column": "<col>", "operator": "<equals|contains|gt|gte|lt|lte|not_equals|date_month|date_year|date_range>", "value": "<value>"}
   ],
-  "group_by": ["<column name>"],
-  "sort_by": {
-    "column": "<column name>",
-    "order": "<one of: asc, desc>"
-  },
-  "limit": <integer>,
-  "aggregation": "<one of: none, count, average, min, max>",
-  "explanation_mode": "<one of: short, normal, detailed>"
+  "group_by": ["<col>"],
+  "sort_by": {"column": "<col>", "order": "<asc|desc>"},
+  "limit": 20,
+  "aggregation": "<none | count | sum | average | min | max>",
+  "explanation_mode": "<short | normal | detailed>"
 }
 
-Sheet selection rules (CRITICAL — pick the right sheet):
-- Questions about customers, KYC status, verified/pending/rejected/expired customers → use the Customer_Master (or customer-level) sheet.
-- Questions about transactions, payments, transfers, transaction amounts → use the Transactions sheet.
-- Questions about risk scores, risk levels, risk assessments → use the Risk_Assessments sheet.
-- Questions about AML alerts, suspicious activity → use the AML_Alerts sheet.
-- Questions about summary statistics already aggregated → use Summary_Dashboard sheet.
-- NEVER default to the largest sheet — always pick the sheet most relevant to the question.
-- Use ONLY column names that exist in the CHOSEN sheet's schema.
+--- GROUP COUNT INTENT ---
+Use for: "most common X", "which X appears most", "which bank/nationality/occupation has most customers"
 
-Column matching rules:
-- If the user asks in natural language, infer the likely columns from meaning, not exact wording.
-- If the query asks for delayed, longest, too long, unusual duration, or slow onboarding, use a duration-like column if one exists.
-- If the query asks for risky, high risk, concerning, or higher review attention, use a risk-like column if one exists.
-- If the query asks about averages by type/category/profile, use compare intent.
-- If the request cannot be safely mapped, set intent = "unsupported".
+{
+  "intent": "group_count",
+  "sheet_key": "<exact sheet_key>",
+  "filters": [],
+  "group_by": ["<column to group by>"],
+  "limit": 5,
+  "explanation_mode": "normal"
+}
+
+--- RATIO INTENT ---
+Use for: percentage queries, rate queries, "X as % of total", "ratio of A to B"
+
+{
+  "intent": "ratio",
+  "sheet_key": "<exact sheet_key>",
+  "numerator_filters": [
+    {"column": "<col>", "operator": "equals", "value": "<val>"}
+  ],
+  "denominator_filters": [],
+  "explanation_mode": "normal"
+}
+Note: leave denominator_filters empty [] to use the total row count as denominator.
+
+=== SHEET SELECTION RULES (CRITICAL) ===
+- Customer KYC status, PEP, EDD, customer counts, customer risk → Customer_Master sheet
+- Transactions, payments, transfers, amounts, fees, alerts triggered → Transactions sheet
+- Risk assessments, composite risk scores, EDD decisions, escalations → Risk_Assessments sheet
+- AML alerts, SAR, suspicious activity, alert scores, open alerts → AML_Alerts sheet
+- Summary statistics already pre-aggregated → Summary_Dashboard sheet
+- NEVER default to the largest sheet
+
+=== OPERATOR USAGE ===
+- equals: exact text match (case-insensitive). For boolean/flag columns always use "Yes" or "No" as value.
+  Example: EDD_Required = Yes, PEP_Flag = Yes, Alert_Status = Open
+- contains: partial text match
+- gt/gte/lt/lte: numeric comparisons (value must be a number)
+- not_equals: exclude a value
+- date_month: filter rows where date column falls in a given month. Value format: "YYYY-MM" (e.g. "2024-01")
+- date_year: filter rows where date column falls in a given year. Value format: "YYYY" (e.g. "2024")
+- date_range: filter rows between two dates. Value format: "YYYY-MM-DD,YYYY-MM-DD"
+
+=== FILTER VALUE RULES ===
+- For EDD queries: use column EDD_Required (or similar) with value "Yes", NOT "EDD" or "Required"
+- For PEP queries: use PEP_Flag (or similar) with value "Yes"
+- For boolean/flag columns, ALWAYS use "Yes" or "No" as the value
+- Use sample_values from the schema to pick the EXACT matching value string
+- For risk categories: look for a Risk_Category or Risk_Level column. Common values: "Low", "Medium", "High", "Very High"
+  If only a numeric Risk_Score exists, use gt/gte/lte:
+    Low Risk: 0-30, Medium Risk: 31-60, High Risk: 61-80, Very High Risk: 81-100
+
+=== AGGREGATION RULES ===
+- sum: total of a numeric column (for "total volume", "total fees", "total amount flagged")
+- average: mean of a numeric column
+- count: count of filtered rows
+- min/max: smallest/largest value
+
+=== INTENT SELECTION GUIDE ===
+- "How many X have Y?" → count (with filters)
+- "Total X in USD?" → aggregate + sum
+- "Average X?" → aggregate + average
+- "Most common X?" or "Which X appears most?" → group_count
+- "Which Y has most X?" → group_count (group_by = Y column)
+- "What % of X are Y?" or "X as a percentage of total" → ratio
+- "Ratio of X to Y" → ratio
+- "List/show X" → filter or lookup
+- "Highest/lowest X" → aggregate max/min or rank
+
 - Do not include any text outside JSON.
 """
 
@@ -116,7 +167,7 @@ EXCEL_ANSWER_PROMPT = """You are the eClerx KYC Assistant.
 
 You are given:
 1. The user's original question
-2. Structured spreadsheet results
+2. Structured spreadsheet results (including intent type)
 3. Optional schema hints
 
 Write a grounded, natural answer.
@@ -127,7 +178,11 @@ Rules:
 - If no rows match, say so clearly.
 - Be concise by default.
 - Sound natural and professional.
-- If the result is tabular, summarize it clearly rather than dumping raw JSON.
+- If the result is tabular (rows), summarize it clearly — name the top value and its count rather than listing every row.
+- If intent is "group_count": state which item appears most frequently and its count. List top 3-5 if relevant.
+- If intent is "ratio": state the numerator, denominator, and the computed percentage clearly. Format as "X out of Y (Z%)".
+- If intent is "aggregate" with aggregation "sum": state the total clearly with currency/unit if applicable.
+- If result shows 0 for a count query that seems unexpected, state the count honestly (do not say "there are none" if it might be a filter mismatch — just report what was found).
 """
 
 
