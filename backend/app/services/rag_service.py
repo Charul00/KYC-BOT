@@ -98,6 +98,7 @@ class RAGService:
         self._embeddings = OpenAIEmbeddings(
             model=settings.EMBEDDING_MODEL,
             openai_api_key=settings.OPENAI_API_KEY,
+            chunk_size=50,  # texts per OpenAI API call — keeps each request ~7.5K tokens (well under 300K limit)
         )
 
         # Primary splitter — respects paragraph / table / page boundaries
@@ -280,13 +281,44 @@ class RAGService:
         return chunks
 
     def add_documents(self, documents: List[Document]) -> int:
-        """Add documents: chunk -> embed -> store in ChromaDB + rebuild BM25."""
+        """Add documents: chunk -> embed (rate-limited batches) -> store in ChromaDB + rebuild BM25."""
+        import time
+
         chunks = self.chunk_documents(documents)
-        if chunks:
-            self._vector_store.add_documents(chunks)
-            self._rebuild_bm25_index()
-            logger.info(f"Added {len(chunks)} chunks. BM25 index refreshed.")
-        return len(chunks)
+        if not chunks:
+            return 0
+
+        # Embed in small batches with a delay to stay within OpenAI's
+        # 1M tokens/minute rate limit.  Each batch of 50 chunks is roughly
+        # 50 × ~150 tokens = ~7,500 tokens → safe headroom even if chunks
+        # are large.  A 1-second pause between batches keeps throughput at
+        # ~450K tokens/min — well under the limit.
+        EMBED_BATCH = 50
+        total = len(chunks)
+        logger.info(f"Ingesting {total} chunks in batches of {EMBED_BATCH} with rate-limit backoff…")
+
+        for start in range(0, total, EMBED_BATCH):
+            batch = chunks[start : start + EMBED_BATCH]
+            while True:
+                try:
+                    self._vector_store.add_documents(batch)
+                    break
+                except Exception as e:
+                    err = str(e)
+                    if "429" in err or "rate" in err.lower():
+                        wait = 15
+                        logger.warning(f"Embedding rate limit hit at chunk {start}, waiting {wait}s…")
+                        time.sleep(wait)
+                    else:
+                        raise
+            pct = min(int((start + len(batch)) / total * 100), 99)
+            logger.info(f"Embedded {start + len(batch)}/{total} chunks ({pct}%)")
+            if start + EMBED_BATCH < total:
+                time.sleep(1)  # 1-second pause between batches
+
+        self._rebuild_bm25_index()
+        logger.info(f"Added {total} chunks total. BM25 index refreshed.")
+        return total
 
     # ==========================================
     # Query Intelligence Helpers
