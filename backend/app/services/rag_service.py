@@ -98,7 +98,7 @@ class RAGService:
         self._embeddings = OpenAIEmbeddings(
             model=settings.EMBEDDING_MODEL,
             openai_api_key=settings.OPENAI_API_KEY,
-            chunk_size=50,  # texts per OpenAI API call — keeps each request ~7.5K tokens (well under 300K limit)
+            chunk_size=500,  # texts per OpenAI API call — good balance for normal PDF/DOCX files
         )
 
         # Primary splitter — respects paragraph / table / page boundaries
@@ -288,33 +288,48 @@ class RAGService:
         if not chunks:
             return 0
 
-        # Embed in small batches with a delay to stay within OpenAI's
-        # 1M tokens/minute rate limit.  Each batch of 50 chunks is roughly
-        # 50 × ~150 tokens = ~7,500 tokens → safe headroom even if chunks
-        # are large.  A 1-second pause between batches keeps throughput at
-        # ~450K tokens/min — well under the limit.
-        EMBED_BATCH = 50
         total = len(chunks)
-        logger.info(f"Ingesting {total} chunks in batches of {EMBED_BATCH} with rate-limit backoff…")
 
-        for start in range(0, total, EMBED_BATCH):
-            batch = chunks[start : start + EMBED_BATCH]
+        # Small files (PDF, DOCX) — under 1000 chunks — embed in one shot, no delay needed.
+        # Large files (Excel 10k+ chunks) — use batches with sleep to stay under 1M TPM limit.
+        LARGE_FILE_THRESHOLD = 1000
+        EMBED_BATCH = 200  # chunks per iteration for large files
+
+        if total <= LARGE_FILE_THRESHOLD:
+            # Fast path: PDF / DOCX — single call, no throttling
+            logger.info(f"Ingesting {total} chunks (fast path)…")
             while True:
                 try:
-                    self._vector_store.add_documents(batch)
+                    self._vector_store.add_documents(chunks)
                     break
                 except Exception as e:
                     err = str(e)
                     if "429" in err or "rate" in err.lower():
-                        wait = 15
-                        logger.warning(f"Embedding rate limit hit at chunk {start}, waiting {wait}s…")
-                        time.sleep(wait)
+                        logger.warning(f"Rate limit on fast path, waiting 5s…")
+                        time.sleep(5)
                     else:
                         raise
-            pct = min(int((start + len(batch)) / total * 100), 99)
-            logger.info(f"Embedded {start + len(batch)}/{total} chunks ({pct}%)")
-            if start + EMBED_BATCH < total:
-                time.sleep(1)  # 1-second pause between batches
+        else:
+            # Slow path: large Excel — batched with 1s delay to avoid 1M TPM rate limit
+            logger.info(f"Ingesting {total} chunks in batches of {EMBED_BATCH} with rate-limit backoff…")
+            for start in range(0, total, EMBED_BATCH):
+                batch = chunks[start : start + EMBED_BATCH]
+                while True:
+                    try:
+                        self._vector_store.add_documents(batch)
+                        break
+                    except Exception as e:
+                        err = str(e)
+                        if "429" in err or "rate" in err.lower():
+                            wait = 15
+                            logger.warning(f"Rate limit at chunk {start}, waiting {wait}s…")
+                            time.sleep(wait)
+                        else:
+                            raise
+                pct = min(int((start + len(batch)) / total * 100), 99)
+                logger.info(f"Embedded {start + len(batch)}/{total} chunks ({pct}%)")
+                if start + EMBED_BATCH < total:
+                    time.sleep(1)  # 1s pause keeps rate under ~900K TPM
 
         self._rebuild_bm25_index()
         logger.info(f"Added {total} chunks total. BM25 index refreshed.")
