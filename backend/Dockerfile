@@ -43,8 +43,8 @@ ENV CHROMA_PERSIST_DIR=/data/chroma_db \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Expose port (Railway sets $PORT automatically)
-EXPOSE 8000
+# Railway injects $PORT — expose it
+EXPOSE ${PORT:-8000}
 
-# Start the server — Railway injects $PORT
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Start server — must bind to $PORT for Railway to route traffic correctly
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
