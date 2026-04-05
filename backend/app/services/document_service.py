@@ -596,18 +596,53 @@ class DocumentService:
     # ──────────────────────────────────────────────────────────────────────────
 
     def _extract_xlsx_text(self, file_path: Path) -> str:
+        """
+        Extract Excel content grouped into row-blocks so the text splitter
+        produces far fewer, richer chunks instead of one chunk per row.
+
+        Strategy:
+        - Group every ROWS_PER_BLOCK rows into one text block
+        - Repeat the header row at the top of every block for context
+        - This reduces a 128k-row file from ~78k chunks down to ~2-4k chunks
+        - Keeps all data retrievable while staying within OpenAI rate limits
+        """
         import openpyxl
+
+        ROWS_PER_BLOCK = 200  # rows grouped per chunk — larger = fewer chunks = fewer API calls
 
         wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
         text_parts = []
+
         for sheet in wb.worksheets:
-            text_parts.append(f"[Sheet: {sheet.title}]")
-            for row in sheet.iter_rows(values_only=True):
+            text_parts.append(f"\n[Sheet: {sheet.title}]")
+            header: list = []
+            data_rows: list = []
+
+            for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
                 row_text = "  |  ".join(str(c) for c in row if c is not None)
-                if row_text.strip():
-                    text_parts.append(row_text)
+                if not row_text.strip():
+                    continue
+                if row_idx == 0:
+                    header = row
+                    text_parts.append("Columns: " + "  |  ".join(str(c) for c in header if c is not None))
+                else:
+                    data_rows.append(row_text)
+
+                    # Flush a block every ROWS_PER_BLOCK rows
+                    if len(data_rows) >= ROWS_PER_BLOCK:
+                        header_line = "Columns: " + "  |  ".join(str(c) for c in header if c is not None)
+                        block = f"[Sheet: {sheet.title}]\n{header_line}\n" + "\n".join(data_rows)
+                        text_parts.append(block)
+                        data_rows = []
+
+            # Flush remaining rows
+            if data_rows:
+                header_line = "Columns: " + "  |  ".join(str(c) for c in header if c is not None)
+                block = f"[Sheet: {sheet.title}]\n{header_line}\n" + "\n".join(data_rows)
+                text_parts.append(block)
+
         wb.close()
-        return "\n".join(text_parts)
+        return "\n\n".join(text_parts)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Document management
