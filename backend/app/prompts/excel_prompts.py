@@ -38,14 +38,15 @@ EXCEL_QUERY_PLAN_PROMPT = """You are an expert spreadsheet query planner.
 
 You will be given:
 1. User query
-2. Spreadsheet schema information
+2. Spreadsheet schema information (multiple sheets with sheet_key, row_count, columns, sheet_purpose)
 
-Your task is to decide how to answer the query from structured spreadsheet data.
+Your task is to decide WHICH sheet to query and HOW to answer the query from structured spreadsheet data.
 
 Return ONLY valid JSON with this structure:
 
 {
   "intent": "<one of: lookup, filter, count, aggregate, compare, rank, unsupported>",
+  "sheet_key": "<exact sheet_key string from the schema that best answers this query>",
   "target_columns": ["<column name>", "<column name>"],
   "filters": [
     {
@@ -64,8 +65,16 @@ Return ONLY valid JSON with this structure:
   "explanation_mode": "<one of: short, normal, detailed>"
 }
 
-Rules:
-- Use ONLY column names that exist in the schema.
+Sheet selection rules (CRITICAL — pick the right sheet):
+- Questions about customers, KYC status, verified/pending/rejected/expired customers → use the Customer_Master (or customer-level) sheet.
+- Questions about transactions, payments, transfers, transaction amounts → use the Transactions sheet.
+- Questions about risk scores, risk levels, risk assessments → use the Risk_Assessments sheet.
+- Questions about AML alerts, suspicious activity → use the AML_Alerts sheet.
+- Questions about summary statistics already aggregated → use Summary_Dashboard sheet.
+- NEVER default to the largest sheet — always pick the sheet most relevant to the question.
+- Use ONLY column names that exist in the CHOSEN sheet's schema.
+
+Column matching rules:
 - If the user asks in natural language, infer the likely columns from meaning, not exact wording.
 - If the query asks for delayed, longest, too long, unusual duration, or slow onboarding, use a duration-like column if one exists.
 - If the query asks for risky, high risk, concerning, or higher review attention, use a risk-like column if one exists.

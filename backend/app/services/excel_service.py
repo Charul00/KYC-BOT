@@ -213,14 +213,25 @@ class ExcelQueryService:
 
         response = self._llm.invoke(prompt)
         try:
-            plan = json.loads(response.content.strip())
+            raw = response.content.strip()
+            # Strip markdown fences if present
+            if raw.startswith("```"):
+                raw = raw.split("```", 2)[-1].lstrip("json").strip()
+                if raw.endswith("```"):
+                    raw = raw[:-3].strip()
+            plan = json.loads(raw)
             if isinstance(plan, dict):
+                logger.info(
+                    f"Excel plan: intent={plan.get('intent')} sheet={plan.get('sheet_key')} "
+                    f"filters={plan.get('filters')} agg={plan.get('aggregation')}"
+                )
                 return plan
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Excel plan JSON parse failed: {e}. Raw: {response.content[:300]}")
 
         return {
             "intent": "unsupported",
+            "sheet_key": "",
             "target_columns": [],
             "filters": [],
             "group_by": [],
@@ -235,6 +246,26 @@ class ExcelQueryService:
     # =========================
 
     def _select_df_for_plan(self, plan: dict) -> Optional[pd.DataFrame]:
+        """
+        Pick the right DataFrame based on the LLM-selected sheet_key in the plan.
+        Falls back to the largest sheet only if no usable sheet_key is found.
+        """
+        sheet_key = plan.get("sheet_key", "").strip()
+
+        # Exact match
+        if sheet_key and sheet_key in self._cache:
+            logger.info(f"Excel: using exact sheet '{sheet_key}'")
+            return self._cache[sheet_key]
+
+        # Partial match — sheet name portion after "::"
+        if sheet_key:
+            sheet_name_hint = sheet_key.split("::", 1)[-1].lower()
+            for key in self._cache:
+                if sheet_name_hint in key.lower():
+                    logger.info(f"Excel: partial-matched sheet '{key}' from hint '{sheet_key}'")
+                    return self._cache[key]
+            logger.warning(f"Excel: sheet_key '{sheet_key}' not found in cache keys: {list(self._cache.keys())}. Falling back.")
+
         return self._get_best_df()
 
     def _apply_filters(self, df: pd.DataFrame, filters: List[dict]) -> pd.DataFrame:
@@ -278,6 +309,7 @@ class ExcelQueryService:
         df = self._select_df_for_plan(plan)
         if df is None or df.empty:
             return {"status": "error", "message": "No Excel data available."}
+        logger.info(f"Excel execute: sheet_key='{plan.get('sheet_key')}' df.shape={df.shape} intent={plan.get('intent')}")
 
         intent = plan.get("intent", "unsupported")
 
