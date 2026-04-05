@@ -1,6 +1,147 @@
 import React, { useState } from 'react'
 
-// ── Copy to clipboard helper
+// ── Inline markdown renderer ──────────────────────────────────────────────────
+// Handles: **bold**, *italic*, `code`, plain text
+function renderInline(text, key = '') {
+  if (!text) return null
+  const parts = []
+  const regex = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`)/g
+  let lastIndex = 0
+  let match
+  let idx = 0
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    const token = match[0]
+    if (token.startsWith('**')) {
+      parts.push(<strong key={`${key}-b${idx++}`} className="font-semibold text-slate-800">{token.slice(2, -2)}</strong>)
+    } else if (token.startsWith('*')) {
+      parts.push(<em key={`${key}-i${idx++}`}>{token.slice(1, -1)}</em>)
+    } else if (token.startsWith('`')) {
+      parts.push(
+        <code key={`${key}-c${idx++}`}
+          className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded text-xs font-mono text-slate-700">
+          {token.slice(1, -1)}
+        </code>
+      )
+    }
+    lastIndex = match.index + token.length
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+  return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts
+}
+
+// Parses a markdown string into an array of React elements
+function MarkdownContent({ text }) {
+  if (!text) return null
+  const lines = text.split('\n')
+  const elements = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    // ── Heading 3
+    if (trimmed.startsWith('### ')) {
+      elements.push(
+        <p key={i} className="text-xs font-bold uppercase tracking-wide text-slate-500 mt-3 mb-1">
+          {renderInline(trimmed.slice(4), `h3-${i}`)}
+        </p>
+      )
+      i++; continue
+    }
+
+    // ── Heading 2
+    if (trimmed.startsWith('## ')) {
+      elements.push(
+        <p key={i} className="text-sm font-bold text-slate-800 mt-3 mb-1">
+          {renderInline(trimmed.slice(3), `h2-${i}`)}
+        </p>
+      )
+      i++; continue
+    }
+
+    // ── Heading 1
+    if (trimmed.startsWith('# ')) {
+      elements.push(
+        <p key={i} className="text-base font-bold text-slate-800 mt-3 mb-1">
+          {renderInline(trimmed.slice(2), `h1-${i}`)}
+        </p>
+      )
+      i++; continue
+    }
+
+    // ── Horizontal rule
+    if (trimmed === '---' || trimmed === '***') {
+      elements.push(<hr key={i} className="my-2 border-slate-200" />)
+      i++; continue
+    }
+
+    // ── Unordered list — collect consecutive items
+    if (trimmed.match(/^[-*•] /)) {
+      const items = []
+      while (i < lines.length && lines[i].trim().match(/^[-*•] /)) {
+        const content = lines[i].trim().replace(/^[-*•] /, '')
+        items.push(
+          <li key={i} className="text-sm leading-relaxed text-slate-700">
+            {renderInline(content, `li-${i}`)}
+          </li>
+        )
+        i++
+      }
+      elements.push(
+        <ul key={`ul-${i}`} className="list-disc list-outside pl-4 my-1 space-y-0.5">
+          {items}
+        </ul>
+      )
+      continue
+    }
+
+    // ── Numbered list — collect consecutive items
+    if (trimmed.match(/^\d+[\.)]\s/)) {
+      const items = []
+      while (i < lines.length && lines[i].trim().match(/^\d+[\.)]\s/)) {
+        const content = lines[i].trim().replace(/^\d+[\.)]\s/, '')
+        items.push(
+          <li key={i} className="text-sm leading-relaxed text-slate-700">
+            {renderInline(content, `li-${i}`)}
+          </li>
+        )
+        i++
+      }
+      elements.push(
+        <ol key={`ol-${i}`} className="list-decimal list-outside pl-4 my-1 space-y-0.5">
+          {items}
+        </ol>
+      )
+      continue
+    }
+
+    // ── Empty line → spacing
+    if (trimmed === '') {
+      // Avoid double-spacing — only add gap if previous wasn't also empty
+      if (elements.length > 0) {
+        elements.push(<div key={i} className="h-1.5" />)
+      }
+      i++; continue
+    }
+
+    // ── Plain paragraph
+    elements.push(
+      <p key={i} className="text-sm leading-relaxed text-slate-700">
+        {renderInline(trimmed, `p-${i}`)}
+      </p>
+    )
+    i++
+  }
+
+  return <div className="space-y-0.5">{elements}</div>
+}
+
+// ── Copy button ───────────────────────────────────────────────────────────────
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
@@ -23,25 +164,49 @@ function CopyButton({ text }) {
         </svg>
       ) : (
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
         </svg>
       )}
     </button>
   )
 }
 
+// ── Source badge ──────────────────────────────────────────────────────────────
+function FileIcon({ filename }) {
+  const ext = (filename || '').split('.').pop().toLowerCase()
+  const MAP = {
+    pdf:  { bg: '#fee2e2', color: '#dc2626', label: 'PDF' },
+    docx: { bg: '#dbeafe', color: '#2563eb', label: 'DOCX' },
+    xlsx: { bg: '#dcfce7', color: '#16a34a', label: 'XLSX' },
+    pptx: { bg: '#ffedd5', color: '#ea580c', label: 'PPTX' },
+    png:  { bg: '#fef3c7', color: '#d97706', label: 'PNG' },
+    jpg:  { bg: '#fef3c7', color: '#d97706', label: 'JPG' },
+    txt:  { bg: '#f1f5f9', color: '#64748b', label: 'TXT' },
+    md:   { bg: '#ede9fe', color: '#7c3aed', label: 'MD'  },
+  }
+  const info = MAP[ext] || { bg: '#f1f5f9', color: '#64748b', label: ext.toUpperCase() || 'DOC' }
+  return (
+    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+      style={{ backgroundColor: info.bg, color: info.color }}>
+      {info.label}
+    </span>
+  )
+}
+
+// ── Main MessageBubble component ──────────────────────────────────────────────
 export default function MessageBubble({ message }) {
   const [showSources, setShowSources] = useState(false)
-  const isUser     = message.role === 'user'
-  const isError    = message.isError
-  const isStreaming = message.streaming === true   // actively receiving tokens
+  const isUser      = message.role === 'user'
+  const isError     = message.isError
+  const isStreaming = message.streaming === true
 
   return (
-    <div className={`flex gap-3 mb-4 message-enter group ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex gap-3 mb-5 message-enter group ${isUser ? 'flex-row-reverse' : ''}`}>
 
       {/* Avatar */}
       <div
-        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm"
         style={{
           backgroundColor: isUser ? '#2563eb' : isError ? '#fef2f2' : '#ffffff',
           border: isUser ? 'none' : isError ? '1px solid #fecaca' : '1px solid #e2e8f0',
@@ -49,7 +214,8 @@ export default function MessageBubble({ message }) {
       >
         {isUser ? (
           <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>
         ) : isError ? (
           <span className="text-xs font-bold" style={{ color: '#dc2626' }}>!</span>
@@ -58,15 +224,14 @@ export default function MessageBubble({ message }) {
         )}
       </div>
 
-      {/* Content */}
-      <div className={`max-w-[80%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+      {/* Content column */}
+      <div className={`max-w-[82%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
 
         {/* Label row */}
-        <div className={`flex items-center gap-2 mb-1 ${isUser ? 'flex-row-reverse' : ''}`}>
-          <p className="text-xs font-medium" style={{ color: '#64748b' }}>
-            {isUser ? 'You' : 'eClerx KYC Assistant'}
+        <div className={`flex items-center gap-2 mb-1.5 ${isUser ? 'flex-row-reverse' : ''}`}>
+          <p className="text-xs font-semibold" style={{ color: '#475569' }}>
+            {isUser ? 'You' : 'KYC Assistant'}
           </p>
-          {/* Copy button — only when AI message is complete */}
           {!isUser && !isError && !isStreaming && message.content && (
             <CopyButton text={message.content} />
           )}
@@ -74,52 +239,62 @@ export default function MessageBubble({ message }) {
 
         {/* Bubble */}
         <div
-          className={`rounded-2xl px-4 py-3 ${
+          className={`rounded-2xl px-4 py-3 shadow-sm ${
             isUser
               ? 'rounded-tr-sm text-white'
               : isError
-              ? 'bg-red-50 border border-red-200 text-red-700 rounded-tl-sm'
-              : 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm'
+              ? 'bg-red-50 border border-red-200 rounded-tl-sm'
+              : 'bg-white border border-slate-200 rounded-tl-sm'
           }`}
           style={isUser ? { backgroundColor: '#2563eb' } : {}}
         >
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">
-            {message.content}
-            {/* Real streaming cursor — shown while tokens are actively arriving */}
-            {!isUser && !isError && isStreaming && (
+          {isUser ? (
+            /* User message — plain text */
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+          ) : isError ? (
+            /* Error message */
+            <p className="text-sm text-red-700 leading-relaxed">{message.content}</p>
+          ) : isStreaming ? (
+            /* Streaming — plain whitespace-pre-wrap + cursor */
+            <p className="text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
+              {message.content}
               <span className="typing-cursor">▍</span>
-            )}
-          </p>
+            </p>
+          ) : (
+            /* Complete AI message — rendered markdown */
+            <MarkdownContent text={message.content} />
+          )}
         </div>
 
-        {/* Sources — only shown after streaming is complete */}
+        {/* Sources panel */}
         {!isUser && !isError && !isStreaming && message.sources && message.sources.length > 0 && (
-          <div className="mt-1.5">
+          <div className="mt-2">
             <button
               onClick={() => setShowSources(!showSources)}
-              className="text-xs flex items-center gap-1 transition-colors"
+              className="flex items-center gap-1.5 text-xs font-medium transition-colors px-2 py-1 rounded-lg hover:bg-blue-50"
               style={{ color: '#2563eb' }}
             >
-              <svg
-                className={`w-3 h-3 transition-transform ${showSources ? 'rotate-90' : ''}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
+              <svg className={`w-3 h-3 transition-transform ${showSources ? 'rotate-90' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
               {message.sources.length} source{message.sources.length > 1 ? 's' : ''} referenced
             </button>
 
             {showSources && (
-              <div className="mt-2 space-y-1.5">
+              <div className="mt-1.5 space-y-1.5 source-enter">
                 {message.sources.map((src, idx) => (
-                  <div key={idx} className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 text-xs">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <span className="font-medium text-slate-500">{src.metadata?.source || 'Document'}</span>
+                  <div key={idx} className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-xs">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FileIcon filename={src.metadata?.source || ''} />
+                      <span className="font-medium text-slate-600 truncate">
+                        {src.metadata?.source || 'Document'}
+                        {src.metadata?.page && (
+                          <span className="ml-1 text-slate-400">· p.{src.metadata.page}</span>
+                        )}
+                      </span>
                     </div>
-                    <p className="text-slate-400 line-clamp-2">{src.content}</p>
+                    <p className="text-slate-500 line-clamp-2 leading-relaxed">{src.content}</p>
                   </div>
                 ))}
               </div>
