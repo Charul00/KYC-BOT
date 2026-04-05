@@ -353,6 +353,13 @@ class RAGService:
             "shown in", "depicted in", "illustrated in", "in the diagram",
             "explain this image", "analyze this image", "read this image",
             "what does this image", "what does the image", "what does the diagram",
+            # broader diagram/flow patterns
+            "flow diagram", "kyc flow", "aml flow", "aml kyc flow",
+            "process flow", "process diagram", "decision tree",
+            "starting point", "start point", "entry point",
+            "end point", "process complete", "inbound inquiry",
+            "the flowchart", "this flow", "kyc process flow",
+            "diagram show", "diagram says", "diagram describe",
         ])
 
     def _get_image_filtered_docs(self, query: str, k: int) -> List[Document]:

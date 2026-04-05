@@ -202,19 +202,24 @@ class VisionService:
             page_ref = f"page {page_num}" if page_num else "this page"
 
             prompt = (
-                f"You are analysing {page_ref} of a financial or business document.\n\n"
-                "Describe ALL visual content on this page in plain text. Include:\n"
-                "1. Charts or graphs — what they show, axes labels, and key data values or trends.\n"
-                "2. Tables — column headers and important rows/values.\n"
-                "3. Text callouts, annotations, or highlighted figures.\n"
-                "4. Executive photos or signature blocks — name the people if labelled.\n\n"
-                "Be specific and include exact numbers when visible "
-                "(e.g. '$58.3 billion', '27%', '2019–2025').\n"
-                "Write in prose paragraphs. Do NOT output JSON. "
-                "Keep response under 400 words.\n"
+                f"You are analysing {page_ref} of a business document.\n\n"
+                "This may be a flowchart, process diagram, decision tree, organisational chart, "
+                "financial chart, or any other visual content.\n\n"
+                "Describe ALL visual content in plain text. Include:\n"
+                "1. FLOWCHARTS / PROCESS DIAGRAMS — List every step, node, and decision point "
+                "in order. For each decision diamond include the Yes and No paths. "
+                "Include exact text from every box, arrow label, and connector. "
+                "Describe the starting point, all branches, and the ending point(s).\n"
+                "2. Charts or graphs — what they show, axes labels, and key data values or trends.\n"
+                "3. Tables — column headers and important rows/values.\n"
+                "4. Text callouts, annotations, or highlighted figures.\n\n"
+                "Be exhaustive — include the EXACT TEXT from every shape/box in the diagram. "
+                "Do NOT summarise or paraphrase the node labels. "
+                "Write in clear prose paragraphs. Do NOT output JSON. "
+                "Keep response under 800 words.\n"
             )
 
-            description = self._call(image_b64, prompt, max_tokens=600).strip()
+            description = self._call(image_b64, prompt, max_tokens=1200).strip()
 
             if len(description) < 20:
                 return ""

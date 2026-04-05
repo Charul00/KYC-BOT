@@ -231,17 +231,34 @@ class DocumentService:
     def _run_image_pipeline(self, image_path: Path) -> Tuple[str, Dict[str, Any]]:
         """
         Full image pipeline: preprocess → OCR (if available) → vision → merge.
-        Gracefully handles missing tesseract or vision failures.
+        For process screenshots / flowcharts / diagrams, a second vision call
+        is made using analyze_chart() to get a detailed plain-text description
+        of the visual content (nodes, decision points, arrows, flow steps).
         """
         bundle = image_preprocessor.preprocess(image_path)
 
-        # OCR step — safe even when tesseract is missing (ocr_service returns empty dict)
+        # OCR step — safe even when tesseract is missing
         ocr_result = ocr_service.extract(bundle.grayscale_image, bundle.binary_image)
 
-        # Vision step — safe even when API key is missing or call fails
+        # Vision step — structured KYC field extraction
         vision_result = vision_service.analyze(image_path)
 
         merged = image_merge_service.merge(bundle.quality, ocr_result, vision_result)
+
+        # For flowcharts / diagrams / process screenshots — run a second vision call
+        # with analyze_chart() to capture the actual flow content in plain text.
+        # This is critical because the KYC identity prompt leaves flowchart nodes empty.
+        doc_type = vision_result.get("doc_type", "unknown")
+        diagram_types = {"process_screenshot", "policy_screenshot", "unknown"}
+        if doc_type in diagram_types:
+            chart_description = vision_service.analyze_chart(image_path, page_num=0)
+            if chart_description and len(chart_description) > 30:
+                logger.info(f"Diagram detected ({doc_type}) — appending chart description ({len(chart_description)} chars)")
+                merged["merged_text"] = (
+                    merged["merged_text"]
+                    + "\n\nDiagram / Flowchart Content:\n"
+                    + chart_description
+                )
 
         metadata = {
             "doc_type": merged.get("doc_type", "unknown"),
