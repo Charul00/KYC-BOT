@@ -81,20 +81,6 @@ const CATEGORIES = [
   },
 ]
 
-// ── KYC Shield icon for welcome hero ──────────────────────────────────────────
-function KycShieldIcon() {
-  return (
-    <svg viewBox="0 0 48 48" fill="none" className="w-10 h-10" xmlns="http://www.w3.org/2000/svg">
-      <path d="M24 4L8 11v12c0 9.4 6.8 18.1 16 20.2C33.2 41.1 40 32.4 40 23V11L24 4z"
-        fill="#1a2744" />
-      <path d="M24 8L12 13.8V23c0 7.6 5.5 14.6 12 16.5 6.5-1.9 12-8.9 12-16.5V13.8L24 8z"
-        fill="#2563eb" opacity="0.3"/>
-      <path d="M20 24.5l2.5 2.5 5.5-5.5" stroke="white" strokeWidth="2.5"
-        strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  )
-}
-
 export default function ChatWindow({ messages, isLoading, onSendMessage }) {
   const [input, setInput]               = useState('')
   const [activeCategory, setActiveCategory] = useState('customer')
@@ -151,10 +137,9 @@ export default function ChatWindow({ messages, isLoading, onSendMessage }) {
               {/* Hero */}
               <div className="flex flex-col items-center mb-7">
                 <div
-                  className="w-20 h-20 rounded-2xl flex items-center justify-center mb-4 shadow-md"
-                  style={{ background: 'linear-gradient(135deg, #1a2744 0%, #2563eb 100%)' }}
+                  className="w-20 h-20 rounded-2xl flex items-center justify-center mb-4 shadow-md bg-white"
                 >
-                  <KycShieldIcon />
+                  <img src="/logo_e.png" alt="Logo" className="h-12 w-auto object-contain" />
                 </div>
                 <h2 className="text-2xl font-bold mb-1.5 tracking-tight" style={{ color: '#1a2744' }}>
                   KYC Intelligence Assistant

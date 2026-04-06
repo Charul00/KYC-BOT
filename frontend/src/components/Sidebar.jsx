@@ -21,17 +21,9 @@ export default function Sidebar({ isOpen, sessions, activeSession, onNewChat, on
               {/* Logo mark */}
               <div
                 className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: 'linear-gradient(135deg, #1a2744 0%, #2563eb 100%)' }}
+                style={{ backgroundColor: '#ffffff' }}
               >
-                {/* Shield icon */}
-                <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5">
-                  <path d="M12 2L4 6v6c0 5.25 3.4 10.15 8 11.35C16.6 22.15 20 17.25 20 12V6L12 2z"
-                    fill="rgba(255,255,255,0.15)" />
-                  <path d="M12 4L6 7.2V12c0 4.2 2.7 8.12 6 9.08C15.3 20.12 18 16.2 18 12V7.2L12 4z"
-                    fill="rgba(255,255,255,0.1)"/>
-                  <path d="M9 12.5l2 2 4-4" stroke="white" strokeWidth="1.8"
-                    strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <img src="/logo_e.png" alt="Logo" className="h-6 w-auto object-contain" />
               </div>
               <div>
                 <span className="font-bold text-white text-sm leading-none">eClerx</span>
