@@ -240,11 +240,23 @@ export default function App() {
             </button>
 
             <div className="flex items-center gap-3">
-              <img src="/eclerx-logo.svg" alt="eClerx" className="h-7" />
+              {/* App icon — pure SVG, no external image */}
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' }}>
+                <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5">
+                  <rect x="2" y="2" width="9" height="12" rx="1.2"
+                    fill="rgba(255,255,255,0.2)" stroke="rgba(255,255,255,0.85)" strokeWidth="1.2"/>
+                  <path d="M4.5 6h4M4.5 8.5h4M4.5 11h2.5"
+                    stroke="rgba(255,255,255,0.9)" strokeWidth="1.1" strokeLinecap="round"/>
+                  <circle cx="15" cy="15" r="4" fill="#10b981"/>
+                  <path d="M13.2 15l1.3 1.3L17 13.5"
+                    stroke="white" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
               <div className="w-px h-5 bg-slate-200" />
               <div>
                 <p className="text-sm font-semibold text-slate-800 leading-none">KYC Assistant</p>
-                <p className="text-xs text-slate-400 mt-0.5">Powered by GPT-4o · RAG</p>
+                <p className="text-xs text-slate-400 mt-0.5">AI Compliance Intelligence</p>
               </div>
             </div>
           </div>

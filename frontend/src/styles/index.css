@@ -3,11 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --eclerx-navy:  #1a2744;
-  --eclerx-dark:  #0f1a2e;
-  --eclerx-blue:  #2563eb;
-  --eclerx-accent:#3b82f6;
-  --eclerx-light: #f0f4ff;
+  --primary:   #6366f1;
+  --primary-2: #8b5cf6;
+  --accent:    #10b981;
+  --dark:      #0f172a;
 }
 
 /* ── Scrollbar ── */
@@ -16,21 +15,30 @@
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* ── Message enter animation ── */
+/* ── Body ── */
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #f1f5f9;
+  margin: 0;
+}
+
+/* ══ ANIMATIONS ══════════════════════════════════════════════════════════════ */
+
+/* Message enter */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .message-enter { animation: fadeInUp 0.22s ease-out; }
 
-/* ── Source panel enter ── */
+/* Source panel enter */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .source-enter { animation: fadeIn 0.18s ease-out; }
 
-/* ── Typing dots ── */
+/* Typing dots */
 @keyframes bounce {
   0%, 60%, 100% { transform: translateY(0); }
   30%            { transform: translateY(-5px); }
@@ -39,18 +47,18 @@
 .typing-dot:nth-child(2) { animation-delay: 0.18s; }
 .typing-dot:nth-child(3) { animation-delay: 0.36s; }
 
-/* ── Spinner ── */
+/* Spinner */
 @keyframes spin { to { transform: rotate(360deg); } }
-.animate-spin { animation: spin 1s linear infinite; }
+.animate-spin { animation: spin 0.9s linear infinite; }
 
-/* ── Pulse (online dot) ── */
+/* Pulse (online dot) */
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50%       { opacity: 0.4; }
+  50%       { opacity: 0.35; }
 }
-.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.animate-pulse { animation: pulse 2s ease-in-out infinite; }
 
-/* ── Typing cursor ── */
+/* Typing cursor */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
@@ -58,15 +66,54 @@
 .typing-cursor {
   display: inline-block;
   animation: blink 0.75s step-end infinite;
-  color: #2563eb;
+  color: #6366f1;
   font-weight: 700;
   margin-left: 1px;
 }
 
-/* ── Copy button ── */
+/* Orb glow for welcome hero */
+@keyframes orbPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.3), 0 8px 32px rgba(99,102,241,0.25); }
+  50%       { box-shadow: 0 0 0 8px rgba(99,102,241,0.08), 0 8px 40px rgba(99,102,241,0.35); }
+}
+.orb-glow { animation: orbPulse 3s ease-in-out infinite; border-radius: 1rem; }
+
+/* ══ INTERACTIVE ELEMENTS ════════════════════════════════════════════════════ */
+
+/* Question cards */
+.question-card:hover {
+  border-color: var(--hover-color, #6366f1) !important;
+  background-color: var(--hover-bg, #eef2ff) !important;
+  box-shadow: 0 2px 12px rgba(99,102,241,0.12);
+  transform: translateY(-1px);
+}
+.question-card { transition: all 0.15s ease; }
+
+/* Send button */
+.send-btn { transition: all 0.15s ease; }
+.send-btn:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(99,102,241,0.4);
+  transform: translateY(-1px);
+}
+.send-btn:not(:disabled):active { transform: scale(0.97); }
+
+/* New chat button */
+.new-chat-btn { transition: all 0.15s ease; }
+.new-chat-btn:hover {
+  box-shadow: 0 4px 16px rgba(99,102,241,0.35);
+  opacity: 0.92;
+}
+
+/* Upload button */
+.upload-btn:hover {
+  background-color: rgba(99,102,241,0.18) !important;
+  color: #a5b4fc !important;
+}
+
+/* ══ UTILITY ═════════════════════════════════════════════════════════════════ */
+
 .copy-btn { transition: opacity 0.15s, background 0.15s; }
 
-/* ── Text clamp ── */
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -74,27 +121,12 @@
   overflow: hidden;
 }
 
-/* ── Category chip ripple on click ── */
-@keyframes ripple {
-  0%   { transform: scale(0.95); }
-  50%  { transform: scale(1.03); }
-  100% { transform: scale(1); }
-}
-.chip-click { animation: ripple 0.2s ease-out; }
-
-/* ── Base body ── */
-body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background-color: #f1f5f9;
-  margin: 0;
-}
-
-/* ── Markdown content spacing ── */
-.space-y-0\.5 > * + * { margin-top: 0.125rem; }
-
-/* ── Textarea focus ring override ── */
-textarea:focus {
+/* Chat input */
+.chat-input {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-  border-color: #2563eb !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.chat-input:focus {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
 }
